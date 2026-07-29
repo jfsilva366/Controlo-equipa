@@ -1,34 +1,197 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-const cfg=window.APP_CONFIG||{};const supabase=createClient(cfg.supabaseUrl,cfg.supabasePublishableKey,{auth:{persistSession:true,autoRefreshToken:true}});
-const $=id=>document.getElementById(id);const state={session:null,profile:null,profiles:[],tasks:[],person:'all',filter:'active',view:'tasks'};
-const statusLabel={todo:'Por iniciar',in_progress:'Em curso',review:'A validar',done:'Validada'};const priorityLabel={low:'Baixa',medium:'Média',high:'Alta',critical:'Crítica'};
-const esc=(v='')=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const localDate=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Lisbon'}).format(new Date());
-function toast(m){const e=$('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2800)}
-function show(id){['loading','login','app'].forEach(x=>$(x).classList.toggle('hidden',x!==id))}
-function isAdmin(){return state.profile?.role==='admin'}
-function profileName(id){const p=state.profiles.find(x=>x.id===id);return p?.full_name||p?.email||'Sem responsável'}
-function formatDate(d,t){if(!d)return'Sem prazo';const day=d===localDate()?'Hoje':new Intl.DateTimeFormat('pt-PT',{day:'2-digit',month:'short'}).format(new Date(`${d}T12:00`));return `${day}${t?` · ${t.slice(0,5)}`:''}`}
-async function boot(){const{data:{session}}=await supabase.auth.getSession();if(!session)return show('login');await enter(session)}
-async function enter(session){state.session=session;const{data,error}=await supabase.from('profiles').select('*').eq('id',session.user.id).single();if(error||!data?.active){await supabase.auth.signOut();$('loginError').textContent='Acesso indisponível.';return show('login')}state.profile=data;document.querySelectorAll('.admin-only').forEach(e=>e.classList.toggle('hidden',!isAdmin()));$('hello').textContent=`Olá, ${(data.full_name||data.email).split(' ')[0]}`;show('app');await refresh();subscribe()}
-async function refresh(){const queries=[supabase.from('tasks').select('*').order('created_at',{ascending:false})];if(isAdmin())queries.push(supabase.from('profiles').select('*').order('full_name'));const results=await Promise.all(queries);if(results.some(r=>r.error))return toast('Erro ao sincronizar dados.');state.tasks=results[0].data||[];state.profiles=isAdmin()?(results[1].data||[]):[state.profile];render()}
-function subscribe(){supabase.channel('atlas-v3-live').on('postgres_changes',{event:'*',schema:'public',table:'tasks'},refresh).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},refresh).subscribe()}
-function filtered(){let list=state.tasks.filter(t=>isAdmin()||t.assignee_id===state.profile.id);if(state.person!=='all')list=list.filter(t=>t.assignee_id===state.person);const today=localDate();if(state.filter==='active')list=list.filter(t=>t.status!=='done');if(state.filter==='today')list=list.filter(t=>t.due_date===today&&t.status!=='done');if(state.filter==='late')list=list.filter(t=>t.due_date&&t.due_date<today&&t.status!=='done');if(state.filter==='critical')list=list.filter(t=>t.priority==='critical'&&t.status!=='done');if(state.filter==='review')list=list.filter(t=>t.status==='review');return list.sort((a,b)=>priorityScore(b.priority)-priorityScore(a.priority)||(a.due_date||'9999').localeCompare(b.due_date||'9999'))}
-const priorityScore=p=>({critical:4,high:3,medium:2,low:1}[p]||0);
-function render(){const own=state.tasks.filter(t=>isAdmin()||t.assignee_id===state.profile.id),active=own.filter(t=>t.status!=='done'),late=active.filter(t=>t.due_date&&t.due_date<localDate()),review=own.filter(t=>t.status==='review');$('statActive').textContent=active.length;$('statLate').textContent=late.length;$('statReview').textContent=review.length;$('navReview').textContent=review.length;renderTabs();renderTasks();renderPriority(active);renderTeam();renderReports();}
-function renderTabs(){if(!isAdmin())return $('peopleTabs').innerHTML='';const people=state.profiles.filter(p=>p.role==='collaborator'&&p.active);const tabs=[{id:'all',name:'Todos',count:state.tasks.length},...people.map(p=>({id:p.id,name:p.full_name||p.email,count:state.tasks.filter(t=>t.assignee_id===p.id&&t.status!=='done').length}))];$('peopleTabs').innerHTML=tabs.map(t=>`<button class="${state.person===t.id?'active':''}" data-person="${t.id}">${esc(t.name)} (${t.count})</button>`).join('');$('peopleTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.person=b.dataset.person;renderTabs();renderTasks()})}
-function card(t){return `<article class="task-card" data-id="${t.id}"><div><div class="task-title">${esc(t.title)}</div><div class="task-meta"><span class="pill ${t.priority}">${priorityLabel[t.priority]}</span><span class="pill ${t.status}">${statusLabel[t.status]}</span><span>${esc(profileName(t.assignee_id))}</span><span>${formatDate(t.due_date,t.due_time)}</span></div></div><span class="task-arrow">›</span></article>`}
-function renderTasks(){const list=filtered();const labels={active:'Tarefas ativas',today:'Tarefas de hoje',late:'Tarefas em atraso',critical:'Tarefas críticas',review:'Pendentes de validação'};$('listTitle').textContent=labels[state.filter]||'Tarefas';$('taskList').innerHTML=list.map(card).join('')||'<div class="empty">Sem tarefas neste filtro.</div>';$('taskList').querySelectorAll('[data-id]').forEach(e=>e.onclick=()=>openTask(e.dataset.id));document.querySelectorAll('.quick-filters button').forEach(b=>b.classList.toggle('active',b.dataset.filter===state.filter))}
-function renderPriority(active){const list=[...active].sort((a,b)=>priorityScore(b.priority)-priorityScore(a.priority)||(a.due_date||'9999').localeCompare(b.due_date||'9999')).slice(0,3);$('prioritySection').classList.toggle('hidden',state.view!=='tasks'||!list.length);$('priorityList').innerHTML=list.map((t,i)=>`<article class="priority-item" data-id="${t.id}"><div><div class="task-title">${i+1}. ${esc(t.title)}</div><div class="task-meta"><span>${esc(profileName(t.assignee_id))}</span><span>${formatDate(t.due_date,t.due_time)}</span></div></div><span class="pill ${t.priority}">${priorityLabel[t.priority]}</span></article>`).join('');$('priorityList').querySelectorAll('[data-id]').forEach(e=>e.onclick=()=>openTask(e.dataset.id))}
-function renderTeam(){if(!isAdmin())return;const people=state.profiles.filter(p=>p.role==='collaborator');$('teamList').innerHTML=people.map(p=>{const active=state.tasks.filter(t=>t.assignee_id===p.id&&t.status!=='done').length,late=state.tasks.filter(t=>t.assignee_id===p.id&&t.status!=='done'&&t.due_date&&t.due_date<localDate()).length;return `<article class="team-card"><span>${esc(p.full_name||p.email)}</span><b>${active}</b><small>Tarefas ativas · ${late} em atraso</small></article>`}).join('')||'<div class="empty">Sem colaboradores.</div>'}
-function renderReports(){if(!isAdmin())return;const done=state.tasks.filter(t=>t.status==='done').length,rate=state.tasks.length?Math.round(done/state.tasks.length*100):0;$('reportCards').innerHTML=`<div><span>Total de tarefas</span><b>${state.tasks.length}</b></div><div><span>Concluídas</span><b>${done}</b></div><div><span>Taxa de conclusão</span><b>${rate}%</b></div>`}
-function setView(view){state.view=view;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('stats').classList.toggle('hidden',view==='team'||view==='reports');$('prioritySection').classList.toggle('hidden',view!=='tasks');$('teamView').classList.toggle('hidden',view!=='team');$('reportsView').classList.toggle('hidden',view!=='reports');$('peopleTabs').parentElement.classList.toggle('hidden',view==='team'||view==='reports');if(view==='validations'){state.filter='review';renderTasks()}else if(view==='tasks'&&state.filter==='review'){state.filter='active';renderTasks()}}
-function resetForm(){$('taskId').value='';$('taskTitle').value='';$('taskPriority').value='medium';$('taskStatus').value='todo';$('taskDate').value='';$('taskTime').value='';$('taskNotes').value='';$('deleteBtn').classList.add('hidden');$('dialogTitle').textContent='Nova tarefa'}
-function populatePeople(){const active=state.profiles.filter(p=>p.active&&(p.role==='collaborator'||!isAdmin()));$('taskPerson').innerHTML=active.map(p=>`<option value="${p.id}">${esc(p.full_name||p.email)}</option>`).join('')}
-function openNew(){resetForm();populatePeople();if(!isAdmin())$('taskPerson').value=state.profile.id;$('taskDialog').showModal()}
-function openTask(id){const t=state.tasks.find(x=>x.id===id);if(!t)return;resetForm();populatePeople();$('taskId').value=t.id;$('taskTitle').value=t.title||'';$('taskPerson').value=t.assignee_id||'';$('taskPriority').value=t.priority||'medium';$('taskStatus').value=t.status||'todo';$('taskDate').value=t.due_date||'';$('taskTime').value=(t.due_time||'').slice(0,5);$('taskNotes').value=t.notes||'';$('dialogTitle').textContent=t.title;$('deleteBtn').classList.toggle('hidden',!isAdmin());['taskTitle','taskPerson','taskPriority','taskDate','taskTime'].forEach(id=>$(id).disabled=!isAdmin());$('taskDialog').showModal()}
-async function saveTask(){const id=$('taskId').value,payload=isAdmin()?{title:$('taskTitle').value.trim(),assignee_id:$('taskPerson').value,priority:$('taskPriority').value,status:$('taskStatus').value,due_date:$('taskDate').value||null,due_time:$('taskTime').value||null,notes:$('taskNotes').value.trim()||null}:{status:$('taskStatus').value,notes:$('taskNotes').value.trim()||null};if(!payload.title&&isAdmin())return toast('Indica o nome da tarefa.');const result=id?await supabase.from('tasks').update(payload).eq('id',id):await supabase.from('tasks').insert(payload);if(result.error)return toast(result.error.message);$('taskDialog').close();toast('Tarefa guardada.');await refresh()}
-async function deleteTask(){const id=$('taskId').value;if(!id||!confirm('Eliminar definitivamente esta tarefa?'))return;const{error}=await supabase.from('tasks').delete().eq('id',id);if(error)return toast(error.message);$('taskDialog').close();toast('Tarefa eliminada.');await refresh()}
-function exportCsv(){const rows=[['Tarefa','Responsável','Prioridade','Estado','Data','Hora'],...state.tasks.map(t=>[t.title,profileName(t.assignee_id),priorityLabel[t.priority],statusLabel[t.status],t.due_date||'',(t.due_time||'').slice(0,5)])];const csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(';')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv'}));a.download=`atlas_${localDate()}.csv`;a.click();URL.revokeObjectURL(a.href)}
-$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';const{data,error}=await supabase.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(error)return $('loginError').textContent='Email ou palavra-passe incorretos.';await enter(data.session)};
-$('newTaskBtn').onclick=openNew;$('taskForm').onsubmit=e=>{e.preventDefault();saveTask()};$('deleteBtn').onclick=deleteTask;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$('taskDialog').close());document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;state.view=state.filter==='review'?'validations':'tasks';setView(state.view);renderTasks()});document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));$('themeBtn').onclick=()=>{document.body.classList.toggle('dark');localStorage.setItem('atlas-theme',document.body.classList.contains('dark')?'dark':'light')};$('logoutBtn').onclick=async()=>{await supabase.auth.signOut();location.reload()};$('openPeopleBtn').onclick=()=>location.href='../';$('exportBtn').onclick=exportCsv;if(localStorage.getItem('atlas-theme')==='dark')document.body.classList.add('dark');boot();
+
+const cfg = window.APP_CONFIG || {};
+const supabase = createClient(cfg.supabaseUrl, cfg.supabasePublishableKey, {
+  auth: { persistSession: true, autoRefreshToken: true }
+});
+
+const $ = id => document.getElementById(id);
+const state = { session:null, profile:null, profiles:[], tasks:[], view:'dashboard', filter:'active', person:'all', installPrompt:null };
+const statusLabel = { todo:'Por iniciar', in_progress:'Em curso', review:'A validar', done:'Validada' };
+const priorityLabel = { low:'Baixa', medium:'Média', high:'Alta', critical:'Crítica' };
+const viewMeta = {
+  dashboard:['Dashboard','Visão imediata da operação.'], tasks:['Tarefas','Planeamento e acompanhamento diário.'],
+  validations:['Validações','Tarefas concluídas a aguardar aprovação.'], team:['Equipa','Distribuição atual do trabalho.'], more:['Mais','Instalação e estado da aplicação.']
+};
+const esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today = () => new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Lisbon'}).format(new Date());
+const isAdmin = () => state.profile?.role === 'admin';
+const priorityScore = p => ({critical:4,high:3,medium:2,low:1}[p] || 0);
+const profileName = id => state.profiles.find(p=>p.id===id)?.full_name || state.profiles.find(p=>p.id===id)?.email || 'Sem colaborador';
+
+function toast(message){ const el=$('toast'); el.textContent=message; el.classList.add('show'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),2600); }
+function show(id){ ['loading','login','app'].forEach(x=>$(x).classList.toggle('hidden',x!==id)); }
+function initials(name='Atlas'){ return name.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase(); }
+function formatDate(date){ if(!date) return 'Sem data'; if(date===today()) return 'Hoje'; return new Intl.DateTimeFormat('pt-PT',{day:'2-digit',month:'short'}).format(new Date(`${date}T12:00:00`)); }
+
+async function boot(){
+  if(!cfg.supabaseUrl || !cfg.supabasePublishableKey){ $('loginError').textContent='Configuração Supabase em falta.'; return show('login'); }
+  const { data:{session} } = await supabase.auth.getSession();
+  if(!session) return show('login');
+  await enter(session);
+}
+
+async function enter(session){
+  state.session=session;
+  const {data,error}=await supabase.from('profiles').select('*').eq('id',session.user.id).single();
+  if(error || !data?.active){ await supabase.auth.signOut(); show('login'); $('loginError').textContent='Acesso indisponível.'; return; }
+  state.profile=data;
+  $('profileName').textContent=data.full_name || data.email;
+  $('profileRole').textContent=data.role==='admin'?'Administrador':'Colaborador';
+  $('avatar').textContent=initials(data.full_name || data.email);
+  document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',!isAdmin()));
+  show('app'); await refresh(); subscribe();
+}
+
+async function refresh(){
+  const taskQuery=supabase.from('tasks').select('*').order('created_at',{ascending:false});
+  const profileQuery=supabase.from('profiles').select('*').order('full_name');
+  const [tasks,profiles]=await Promise.all([taskQuery,profileQuery]);
+  if(tasks.error || profiles.error){ toast('Erro ao sincronizar dados.'); return; }
+  state.tasks=tasks.data||[]; state.profiles=profiles.data||[state.profile]; render();
+}
+
+function subscribe(){
+  supabase.channel('atlas-v01-live')
+    .on('postgres_changes',{event:'*',schema:'public',table:'tasks'},refresh)
+    .on('postgres_changes',{event:'*',schema:'public',table:'profiles'},refresh)
+    .subscribe(status=>{ if($('syncStatus')) $('syncStatus').textContent=status==='SUBSCRIBED'?'Ligado ao Supabase em tempo real.':'A sincronizar…'; });
+}
+
+function visibleTasks(){ return state.tasks.filter(t=>isAdmin() || t.assignee_id===state.profile.id); }
+function filteredTasks(){
+  let list=visibleTasks(); const d=today();
+  if(state.person!=='all') list=list.filter(t=>t.assignee_id===state.person);
+  if(state.filter==='active') list=list.filter(t=>t.status!=='done');
+  if(state.filter==='today') list=list.filter(t=>t.due_date===d && t.status!=='done');
+  if(state.filter==='late') list=list.filter(t=>t.due_date && t.due_date<d && t.status!=='done');
+  if(state.filter==='critical') list=list.filter(t=>t.priority==='critical' && t.status!=='done');
+  if(state.filter==='review') list=list.filter(t=>t.status==='review');
+  if(state.filter==='done') list=list.filter(t=>t.status==='done');
+  return list.sort((a,b)=>priorityScore(b.priority)-priorityScore(a.priority)||(a.due_date||'9999').localeCompare(b.due_date||'9999'));
+}
+
+function taskCard(t){
+  const global=t.task_scope==='global'?'<span class="pill global">Global</span>':'';
+  return `<article class="task-card" data-id="${t.id}"><div><div class="task-title">${esc(t.title)}</div><div class="task-meta">${global}<span class="pill ${t.priority}">${priorityLabel[t.priority]}</span><span class="pill ${t.status}">${statusLabel[t.status]}</span><span>${esc(profileName(t.assignee_id))}</span><span>${esc(t.area||'Sem departamento')}</span><span>${formatDate(t.due_date)}</span></div></div><span class="task-arrow">›</span></article>`;
+}
+
+function render(){
+  const own=visibleTasks(), active=own.filter(t=>t.status!=='done'), late=active.filter(t=>t.due_date&&t.due_date<today()), review=own.filter(t=>t.status==='review');
+  $('statActive').textContent=active.length; $('statLate').textContent=late.length; $('statReview').textContent=review.length;
+  $('navTasks').textContent=active.length; $('navReview').textContent=review.length;
+  const focus=[...active].sort((a,b)=>priorityScore(b.priority)-priorityScore(a.priority)||(a.due_date||'9999').localeCompare(b.due_date||'9999')).slice(0,5);
+  $('priorityList').innerHTML=focus.map(taskCard).join('')||'<div class="empty">Sem prioridades pendentes.</div>';
+  $('priorityList').querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openTask(el.dataset.id));
+  renderTasks(); renderValidations(); renderPeopleTabs(); renderTeam();
+}
+
+function renderTasks(){
+  const labels={active:'Tarefas ativas',today:'Tarefas de hoje',late:'Tarefas em atraso',critical:'Tarefas críticas',done:'Tarefas validadas'};
+  $('listTitle').textContent=labels[state.filter]||'Tarefas';
+  const list=filteredTasks(); $('taskList').innerHTML=list.map(taskCard).join('')||'<div class="empty">Sem tarefas neste filtro.</div>';
+  $('taskList').querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openTask(el.dataset.id));
+  document.querySelectorAll('.quick-filters [data-filter]').forEach(b=>b.classList.toggle('active',b.dataset.filter===state.filter));
+}
+
+function renderValidations(){
+  const list=visibleTasks().filter(t=>t.status==='review');
+  $('validationList').innerHTML=list.map(taskCard).join('')||'<div class="empty">Não existem tarefas por validar.</div>';
+  $('validationList').querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openTask(el.dataset.id));
+}
+
+function renderPeopleTabs(){
+  if(!isAdmin()) return;
+  const people=state.profiles.filter(p=>p.active&&p.role==='collaborator');
+  const tabs=[{id:'all',name:'Todos'},...people.map(p=>({id:p.id,name:p.full_name||p.email}))];
+  $('peopleTabs').innerHTML=tabs.map(p=>`<button class="${state.person===p.id?'active':''}" data-person="${p.id}">${esc(p.name)}</button>`).join('');
+  $('peopleTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.person=b.dataset.person;renderPeopleTabs();renderTasks();});
+}
+
+function renderTeam(){
+  if(!isAdmin()) return;
+  const people=state.profiles.filter(p=>p.active&&p.role==='collaborator');
+  $('teamList').innerHTML=people.map(p=>{
+    const active=state.tasks.filter(t=>t.assignee_id===p.id&&t.status!=='done').length;
+    const late=state.tasks.filter(t=>t.assignee_id===p.id&&t.status!=='done'&&t.due_date&&t.due_date<today()).length;
+    const review=state.tasks.filter(t=>t.assignee_id===p.id&&t.status==='review').length;
+    return `<article class="team-card"><div class="avatar">${initials(p.full_name||p.email)}</div><div><strong>${esc(p.full_name||p.email)}</strong><small>${esc(p.department||'Sem departamento')}</small></div><b>${active}</b><span>ativas · ${late} atraso · ${review} validar</span></article>`;
+  }).join('')||'<div class="empty">Sem colaboradores ativos.</div>';
+}
+
+function setView(view){
+  state.view=view; const [title,subtitle]=viewMeta[view]||viewMeta.dashboard;
+  $('pageTitle').textContent=title; $('pageSubtitle').textContent=subtitle;
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hidden',v.id!==`${view}View`));
+  document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+}
+
+function departments(){
+  return [...new Set(state.profiles.map(p=>p.department).filter(Boolean).concat(state.tasks.map(t=>t.area).filter(Boolean)))].sort();
+}
+function populateFormOptions(){
+  const people=state.profiles.filter(p=>p.active&&p.role==='collaborator');
+  $('taskPerson').innerHTML=people.map(p=>`<option value="${p.id}">${esc(p.full_name||p.email)}</option>`).join('');
+  const deps=departments(); $('taskDepartment').innerHTML=deps.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  if(!deps.length) $('taskDepartment').innerHTML='<option value="Logística">Logística</option>';
+}
+function setScope(scope){
+  $('taskScope').value=scope; document.querySelectorAll('[data-scope]').forEach(b=>b.classList.toggle('active',b.dataset.scope===scope));
+  $('personField').classList.toggle('hidden',scope==='global');
+}
+function resetForm(){
+  $('taskId').value=''; $('taskTitle').value=''; $('taskPriority').value='medium'; $('taskStatus').value='todo'; $('taskDate').value=today();
+  $('dialogTitle').textContent='Nova tarefa'; $('deleteBtn').classList.add('hidden'); setScope('individual');
+}
+function openNew(){ resetForm(); populateFormOptions(); $('taskOwner').value=state.profile.full_name||state.profile.email; $('taskDialog').showModal(); }
+function openTask(id){
+  const t=state.tasks.find(x=>x.id===id); if(!t) return; resetForm(); populateFormOptions();
+  $('taskId').value=t.id; $('taskTitle').value=t.title||''; $('taskPerson').value=t.assignee_id||''; $('taskDepartment').value=t.area||departments()[0]||'Logística';
+  $('taskPriority').value=t.priority||'medium'; $('taskDate').value=t.due_date||today(); $('taskStatus').value=t.status||'todo'; $('taskOwner').value=profileName(t.created_by);
+  $('dialogTitle').textContent=t.title; $('deleteBtn').classList.toggle('hidden',!isAdmin()); setScope(t.task_scope||'individual');
+  const editable=isAdmin(); ['taskTitle','taskPerson','taskDepartment','taskPriority','taskDate'].forEach(id=>$(id).disabled=!editable);
+  document.querySelector('.type-switch').classList.toggle('hidden',!editable||Boolean(t.id)); $('taskDialog').showModal();
+}
+
+async function saveTask(){
+  const id=$('taskId').value; const common={ title:$('taskTitle').value.trim(), area:$('taskDepartment').value, priority:$('taskPriority').value, due_date:$('taskDate').value, status:$('taskStatus').value };
+  if(!common.title) return toast('Indica a tarefa.');
+  if(!isAdmin()){
+    const {error}=await supabase.from('tasks').update({status:common.status,completed_at:common.status==='review'?new Date().toISOString():null}).eq('id',id);
+    if(error) return toast(error.message); $('taskDialog').close(); toast('Estado atualizado.'); return refresh();
+  }
+  if(id){
+    const payload={...common,assignee_id:$('taskPerson').value};
+    if(common.status==='done') payload.validated_by=state.profile.id;
+    const {error}=await supabase.from('tasks').update(payload).eq('id',id); if(error) return toast(error.message);
+  } else if($('taskScope').value==='global'){
+    const people=state.profiles.filter(p=>p.active&&p.role==='collaborator'); if(!people.length) return toast('Não existem colaboradores ativos.');
+    const group=crypto.randomUUID();
+    const rows=people.map(p=>({...common,assignee_id:p.id,created_by:state.profile.id,task_scope:'global',global_group_id:group}));
+    const {error}=await supabase.from('tasks').insert(rows); if(error) return toast(error.message);
+  } else {
+    const {error}=await supabase.from('tasks').insert({...common,assignee_id:$('taskPerson').value,created_by:state.profile.id,task_scope:'individual'}); if(error) return toast(error.message);
+  }
+  $('taskDialog').close(); toast('Tarefa guardada.'); await refresh();
+}
+
+async function deleteTask(){
+  const id=$('taskId').value; if(!id||!confirm('Eliminar esta tarefa?')) return;
+  const task=state.tasks.find(t=>t.id===id); let query=supabase.from('tasks').delete();
+  query=task?.task_scope==='global'&&task.global_group_id?query.eq('global_group_id',task.global_group_id):query.eq('id',id);
+  const {error}=await query; if(error) return toast(error.message); $('taskDialog').close(); toast('Tarefa eliminada.'); await refresh();
+}
+
+$('loginForm').onsubmit=async e=>{ e.preventDefault(); $('loginError').textContent=''; const {data,error}=await supabase.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value}); if(error){$('loginError').textContent='Email ou palavra-passe incorretos.';return;} await enter(data.session); };
+$('taskForm').onsubmit=e=>{e.preventDefault();saveTask();}; $('newTaskBtn').onclick=openNew; $('mobileAddBtn').onclick=openNew; $('deleteBtn').onclick=deleteTask;
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$('taskDialog').close());
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));
+document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;setView('tasks');renderTasks();});
+document.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>setScope(b.dataset.scope));
+$('themeBtn').onclick=()=>{document.body.classList.toggle('light');localStorage.setItem('atlas-theme',document.body.classList.contains('light')?'light':'dark');};
+$('logoutBtn').onclick=async()=>{await supabase.auth.signOut();location.reload();};
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.installPrompt=e;$('installBtn').classList.remove('hidden');});
+$('installBtn').onclick=async()=>{if(!state.installPrompt)return;state.installPrompt.prompt();await state.installPrompt.userChoice;state.installPrompt=null;$('installBtn').classList.add('hidden');};
+if(localStorage.getItem('atlas-theme')==='light')document.body.classList.add('light');
+if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
+boot();
