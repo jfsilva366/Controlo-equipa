@@ -13,7 +13,36 @@ function showToast(message, error = false) {
   el.textContent = message;
   el.className = `toast show${error ? ' error' : ''}`;
   clearTimeout(el._inviteTimer);
-  el._inviteTimer = setTimeout(() => { el.className = 'toast'; }, 4000);
+  el._inviteTimer = setTimeout(() => { el.className = 'toast'; }, 4500);
+}
+
+async function getFunctionError(error, data, fallback) {
+  if (data?.error) return data.error;
+  const response = error?.context;
+  if (response && typeof response.clone === 'function') {
+    try {
+      const payload = await response.clone().json();
+      if (payload?.error) return payload.error;
+      if (payload?.message) return payload.message;
+    } catch {
+      try {
+        const text = await response.clone().text();
+        if (text) return text;
+      } catch { /* sem corpo legível */ }
+    }
+  }
+  return error?.message || fallback;
+}
+
+function friendlyInviteError(message = '') {
+  const normalized = message.toLowerCase();
+  if (normalized.includes('rate limit') || normalized.includes('429')) {
+    return 'Limite temporário de emails atingido. Aguarda alguns minutos e usa “Reenviar convite”.';
+  }
+  if (normalized.includes('already') || normalized.includes('registered')) {
+    return 'Este email já tem uma conta criada. Usa a recuperação de palavra-passe.';
+  }
+  return message;
 }
 
 function showActivationPanel() {
@@ -22,6 +51,29 @@ function showActivationPanel() {
   $('loginTab')?.classList.remove('active');
   $('registerTab')?.classList.remove('hidden');
   $('registerTab')?.classList.add('active');
+}
+
+async function sendInvitation(payload, button) {
+  const originalText = button?.textContent || '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'A enviar…';
+  }
+
+  const { data, error } = await supabase.functions.invoke('invite-team-member', {
+    body: { ...payload, redirect_to: APP_URL }
+  });
+
+  if (button) {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+
+  if (error || data?.error) {
+    const message = await getFunctionError(error, data, 'Não foi possível enviar o convite.');
+    throw new Error(friendlyInviteError(message));
+  }
+  return data;
 }
 
 const inviteButton = $('createInviteBtn');
@@ -37,22 +89,15 @@ if (inviteButton) {
       return;
     }
 
-    inviteButton.disabled = true;
-    inviteButton.textContent = 'A enviar convite…';
-    const { data, error } = await supabase.functions.invoke('invite-team-member', {
-      body: { email, full_name, department, role, redirect_to: APP_URL }
-    });
-    inviteButton.disabled = false;
-    inviteButton.textContent = 'Criar acesso e enviar convite';
-
-    if (error || data?.error) {
-      showToast(data?.error || error?.message || 'Não foi possível criar o acesso.', true);
-      return;
+    try {
+      await sendInvitation({ email, full_name, department, role }, inviteButton);
+      ['inviteEmail', 'inviteName', 'inviteDepartment'].forEach((id) => { $(id).value = ''; });
+      showToast(`Convite enviado para ${email}.`);
+      $('refreshPeopleBtn')?.click();
+    } catch (error) {
+      showToast(error.message, true);
+      $('refreshPeopleBtn')?.click();
     }
-
-    ['inviteEmail', 'inviteName', 'inviteDepartment'].forEach((id) => { $(id).value = ''; });
-    showToast(`Convite enviado para ${email}.`);
-    $('refreshPeopleBtn')?.click();
   };
 }
 
@@ -89,6 +134,20 @@ if ($('registerBtn')) {
   };
 }
 
+async function sendPasswordRecovery(email, button = null) {
+  const originalText = button?.textContent || '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'A enviar…';
+  }
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: APP_URL });
+  if (button) {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+  if (error) throw error;
+}
+
 const loginButton = $('loginBtn');
 if (loginButton && !$('forgotPasswordBtn')) {
   const forgotButton = document.createElement('button');
@@ -106,19 +165,16 @@ if (loginButton && !$('forgotPasswordBtn')) {
       if (msg) msg.textContent = 'Introduz primeiro o email do colaborador.';
       return;
     }
-    forgotButton.disabled = true;
-    forgotButton.textContent = 'A enviar email…';
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: APP_URL });
-    forgotButton.disabled = false;
-    forgotButton.textContent = 'Definir ou recuperar palavra-passe';
-    const msg = $('loginMessage');
-    if (error) {
-      if (msg) msg.textContent = error.message;
-      return;
-    }
-    if (msg) {
-      msg.textContent = 'Email enviado. Abre o link recebido para definir a palavra-passe.';
-      msg.classList.add('success');
+    try {
+      await sendPasswordRecovery(email, forgotButton);
+      const msg = $('loginMessage');
+      if (msg) {
+        msg.textContent = 'Email enviado. Abre o link recebido para definir a palavra-passe.';
+        msg.classList.add('success');
+      }
+    } catch (error) {
+      const msg = $('loginMessage');
+      if (msg) msg.textContent = friendlyInviteError(error.message);
     }
   };
 }
@@ -129,41 +185,97 @@ async function removeUser(userId, displayName) {
     body: { user_id: userId }
   });
   if (error || data?.error) {
-    showToast(data?.error || error?.message || 'Não foi possível remover o utilizador.', true);
+    const message = await getFunctionError(error, data, 'Não foi possível remover o utilizador.');
+    showToast(message, true);
     return;
   }
   showToast('Utilizador removido definitivamente.');
   $('refreshPeopleBtn')?.click();
 }
 
-function addRemoveButtons() {
+function addUserActions() {
   const list = $('peopleList');
   if (!list) return;
   list.querySelectorAll('.person-row').forEach((row) => {
-    if (row.dataset.removeReady === 'true') return;
     const toggle = row.querySelector('[data-toggle-user]');
-    if (!toggle) return;
-    row.dataset.removeReady = 'true';
-    if (toggle.disabled) return;
-
+    if (!toggle || toggle.disabled) return;
     const userId = toggle.dataset.toggleUser;
     const displayName = row.querySelector('strong')?.textContent?.trim() || 'este utilizador';
+    const email = row.querySelector('small')?.textContent?.split(' · ')[0]?.trim();
     const actions = row.querySelector('.person-actions') || row;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'btn small danger';
-    button.textContent = 'Remover';
-    button.dataset.removeUser = userId;
-    button.onclick = () => removeUser(userId, displayName);
-    actions.appendChild(button);
+
+    if (!row.querySelector('[data-reset-user]') && email) {
+      const resetButton = document.createElement('button');
+      resetButton.type = 'button';
+      resetButton.className = 'btn small';
+      resetButton.textContent = 'Redefinir palavra-passe';
+      resetButton.dataset.resetUser = email;
+      resetButton.onclick = async () => {
+        try {
+          await sendPasswordRecovery(email, resetButton);
+          showToast(`Email de redefinição enviado para ${email}.`);
+        } catch (error) {
+          showToast(friendlyInviteError(error.message), true);
+        }
+      };
+      actions.appendChild(resetButton);
+    }
+
+    if (!row.querySelector('[data-remove-user]')) {
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'btn small danger';
+      removeButton.textContent = 'Remover';
+      removeButton.dataset.removeUser = userId;
+      removeButton.onclick = () => removeUser(userId, displayName);
+      actions.appendChild(removeButton);
+    }
   });
 }
 
-const peopleList = $('peopleList');
-if (peopleList) {
-  new MutationObserver(addRemoveButtons).observe(peopleList, { childList: true, subtree: true });
-  addRemoveButtons();
+function addPendingInviteActions() {
+  const list = $('inviteList');
+  if (!list) return;
+  list.querySelectorAll('.person-row').forEach((row) => {
+    if (row.querySelector('[data-resend-invite]')) return;
+    const cancelButton = row.querySelector('[data-cancel-invite]');
+    const email = row.querySelector('small')?.textContent?.split(' · ')[0]?.trim();
+    const full_name = row.querySelector('strong')?.textContent?.trim();
+    if (!cancelButton || !email || !full_name) return;
+
+    const details = row.querySelector('small')?.textContent?.split(' · ') || [];
+    const department = details[1] && details[1] !== 'Sem departamento' ? details[1] : null;
+    const role = details[2] === 'Administrador' ? 'admin' : 'collaborator';
+    const actions = row.querySelector('.person-actions') || row;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn small primary';
+    button.textContent = 'Reenviar convite';
+    button.dataset.resendInvite = email;
+    button.onclick = async () => {
+      try {
+        await sendInvitation({ email, full_name, department, role }, button);
+        showToast(`Novo convite enviado para ${email}.`);
+        $('refreshPeopleBtn')?.click();
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+    actions.insertBefore(button, actions.firstChild);
+  });
 }
+
+function enhanceAccessLists() {
+  addUserActions();
+  addPendingInviteActions();
+}
+
+['peopleList', 'inviteList'].forEach((id) => {
+  const list = $(id);
+  if (!list) return;
+  new MutationObserver(enhanceAccessLists).observe(list, { childList: true, subtree: true });
+});
+enhanceAccessLists();
 
 const inviteInUrl = location.hash.includes('type=invite') || location.hash.includes('type=recovery') || new URLSearchParams(location.search).has('code');
 if (inviteInUrl) window.setTimeout(showActivationPanel, 250);
