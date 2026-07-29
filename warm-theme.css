@@ -1,0 +1,51 @@
+:root{
+  --bg:#f4efe7;
+  --panel:#fffdf9;
+  --panel2:#f8f1e7;
+  --surface:#fffaf3;
+  --sidebar:#eee4d5;
+  --line:#dfd1bd;
+  --text:#35291f;
+  --muted:#897766;
+  --red:#a46b32;
+  --red2:#ead6bc;
+  --good:#66805f;
+  --warn:#c28a3c;
+  --danger:#b45e52;
+  --shadow:0 18px 46px rgba(94,70,43,.12);
+}
+body[data-theme="light"],body[data-theme="dark"]{
+  --bg:#f4efe7;
+  --panel:#fffdf9;
+  --panel2:#f8f1e7;
+  --surface:#fffaf3;
+  --sidebar:#eee4d5;
+  --line:#dfd1bd;
+  --text:#35291f;
+  --muted:#897766;
+  --red:#a46b32;
+  --red2:#ead6bc;
+  --good:#66805f;
+  --warn:#c28a3c;
+  --danger:#b45e52;
+  --shadow:0 18px 46px rgba(94,70,43,.12);
+}
+body{background:radial-gradient(circle at 82% 0,rgba(184,139,85,.13),transparent 30%),linear-gradient(145deg,#f7f2eb,#f1e8dc);letter-spacing:-.01em}
+.sidebar{background:linear-gradient(180deg,#f4eadc 0%,#eadcc8 100%);box-shadow:8px 0 30px rgba(98,73,43,.06)}
+.brand{color:#5d3f23;font-weight:700;letter-spacing:.08em}.brand span{color:#a46b32}
+.user-card{background:rgba(255,253,249,.58);border:1px solid rgba(174,145,111,.26);border-radius:18px;padding:14px;margin:0 0 22px}.avatar{border-radius:14px;background:linear-gradient(145deg,#d8b587,#b77a3f);color:#fff;box-shadow:0 8px 20px rgba(125,83,39,.18)}
+.nav button,.side-action{border-radius:12px}.nav button:hover,.nav button.active,.side-action:hover{background:rgba(255,253,249,.72);color:#4c3522}.nav button.active{border-left:0;box-shadow:inset 3px 0 #a46b32}
+.main{padding:34px}.eyebrow{color:#a46b32}.topbar h2{font-weight:650;letter-spacing:-.04em}.topbar p{color:#927e69}
+.btn{border-radius:11px;background:#fffaf3;box-shadow:0 2px 8px rgba(94,70,43,.04)}.btn:hover{border-color:#b88958;transform:translateY(-1px)}.btn.primary{background:linear-gradient(135deg,#b37b42,#93602f);border-color:#93602f;color:#fff;box-shadow:0 9px 20px rgba(132,84,37,.2)}.btn.danger{background:#fff7f5}
+.stats{gap:15px}.stat{border-radius:18px;background:linear-gradient(145deg,#fffdf9,#f8f0e5);box-shadow:0 9px 24px rgba(95,70,42,.07);border-color:#e4d7c5}.stat b{color:#604122;font-weight:650}.stat span{letter-spacing:.12em}
+.filters{border-radius:18px;background:rgba(255,253,249,.78);backdrop-filter:blur(12px);box-shadow:0 8px 24px rgba(95,70,42,.06)}
+input,select,textarea{border-radius:11px;background:#fffdf9;border-color:#ddceb9}input:focus,select:focus,textarea:focus{border-color:#a46b32;box-shadow:0 0 0 3px rgba(164,107,50,.1)}
+.column,.collaborator-list,.admin-person-section{border-radius:18px;background:rgba(255,253,249,.8);box-shadow:0 10px 28px rgba(94,70,43,.07);overflow:hidden}.column-head,.collaborator-list-head{background:#f4eadc}.task-card,.collaborator-task-row,.workflow-task-detail{background:#fffdf9;border-radius:14px}.task-card:hover,.workflow-task-detail:hover{border-color:#b98a57;box-shadow:0 10px 24px rgba(101,74,42,.09)}
+.tag{border-radius:999px;padding:5px 8px;background:#faf5ee}.tag.medium{border-color:#9b8065;color:#765d45}.tag.high{border-color:#c08545;color:#9b6128}.tag.low{border-color:#77906f;color:#5e7858}.tag.critical{border-color:#b45e52;color:#a44d43}
+.workflow-status,.status-pill{border-radius:999px}.status-todo{color:#857362}.status-in_progress{color:#9c6b2f}.status-review{color:#8a5a2d}.status-done{color:#5f7959}
+.admin-person-header{background:linear-gradient(90deg,#f7eee2,#fffaf3);color:#493421}.admin-person-count{background:#ead7bf;color:#6d4928;border-radius:999px;padding:6px 10px}.admin-person-section.open .admin-person-header{background:linear-gradient(90deg,#ead9c2,#f8efe3)}
+.dialog{border-radius:22px;border-color:#d9c8b2;background:#fffdf9}.dialog::backdrop{background:rgba(53,41,31,.38);backdrop-filter:blur(5px)}.dialog-head{background:#f7eee3;border-radius:22px 22px 0 0}.dialog-foot{background:#fbf5ed;border-radius:0 0 22px 22px}
+.login-shell{border-radius:26px;overflow:hidden}.login-brand{background:linear-gradient(145deg,rgba(185,133,77,.22),transparent 58%),#efe2d1}.auth-card{background:#fffdf9}
+.toast{border-radius:13px;background:#fffdf9;box-shadow:var(--shadow)}
+.mobile-top{background:#eee2d2;color:#4d3522}
+@media(max-width:760px){.main{padding:16px}.stats{gap:10px}.stat{border-radius:15px}.topbar h2{font-size:26px}.sidebar{box-shadow:18px 0 45px rgba(67,46,26,.18)}}
