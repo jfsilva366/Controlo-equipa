@@ -1,1 +1,419 @@
-import{createClient}from'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';const $=id=>document.getElementById(id),cfg=window.APP_CONFIG||{},ok=/^https:\/\/.+\.supabase\.co$/.test(cfg.supabaseUrl||'')&&(cfg.supabasePublishableKey||'').length>20,sb=ok?createClient(cfg.supabaseUrl,cfg.supabasePublishableKey,{auth:{persistSession:true,autoRefreshToken:true}}):null,S={session:null,profile:null,profiles:[],tasks:[],invitations:[],view:'all',channel:null},SM={todo:'Por iniciar',in_progress:'Em curso',review:'A validar',done:'Concluída'},PM={low:'Baixa',medium:'Média',high:'Alta',critical:'Crítica'},COL=['todo','in_progress','review','done'];function toast(m,e=false){let x=$('toast');x.textContent=m;x.className=`toast show${e?' error':''}`;clearTimeout(x._t);x._t=setTimeout(()=>x.className='toast',3000)}function msg(id,m,s=false){let x=$(id);x.textContent=m||'';x.className=`form-message${s?' success':''}`}function today(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Lisbon'}).format(new Date())}function esc(v=''){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}function initials(v=''){return v.split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join('').toUpperCase()||'?'}function date(d,t){if(!d)return'Sem prazo';return new Intl.DateTimeFormat('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric',...(t?{hour:'2-digit',minute:'2-digit'}:{})}).format(new Date(`${d}T${t||'12:00'}`))}function admin(){return S.profile?.role==='admin'&&S.profile?.active}function busy(t='A sincronizar…'){$('syncStatus').textContent=t}function synced(){$('syncStatus').textContent=`Sincronizado às ${new Intl.DateTimeFormat('pt-PT',{hour:'2-digit',minute:'2-digit'}).format(new Date())}`}function auth(){$('loadingScreen').classList.add('hidden');$('appShell').classList.add('hidden');$('mobileTop').classList.add('hidden');$('loginScreen').classList.remove('hidden')}function app(){$('loadingScreen').classList.add('hidden');$('loginScreen').classList.add('hidden');$('appShell').classList.remove('hidden');$('mobileTop').classList.remove('hidden')}async function boot(){if(!ok){$('configWarning').classList.remove('hidden');auth();return}let{data:{session}}=await sb.auth.getSession();session?await enter(session):auth()}async function enter(session){S.session=session;let{data,error}=await sb.from('profiles').select('*').eq('id',session.user.id).single();if(error||!data){await sb.auth.signOut();auth();msg('loginMessage','Perfil não encontrado. Contacta o administrador.');return}if(!data.active){await sb.auth.signOut();auth();msg('loginMessage','A conta ainda não está ativa.');return}S.profile=data;$('userName').textContent=data.full_name||data.email;$('userRole').textContent=data.role==='admin'?'Administrador':data.department||'Colaborador';$('userAvatar').textContent=initials(data.full_name||data.email);document.querySelectorAll('.admin-only').forEach(x=>x.classList.toggle('hidden',!admin()));app();await refresh();live()}async function refresh(){busy();let q=[sb.from('tasks').select('*').order('created_at',{ascending:false})];if(admin())q.push(sb.from('profiles').select('*').order('full_name'),sb.from('invitations').select('*').order('created_at',{ascending:false}));let r=await Promise.all(q),bad=r.find(x=>x.error);if(bad){toast(bad.error.message,true);synced();return}S.tasks=r[0].data||[];if(admin()){S.profiles=r[1].data||[];S.invitations=r[2].data||[]}else S.profiles=[S.profile];filters();render();synced()}function live(){if(S.channel)sb.removeChannel(S.channel);S.channel=sb.channel('team-control-live').on('postgres_changes',{event:'*',schema:'public',table:'tasks'},refresh).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},refresh).subscribe(s=>{$('connectionDot').style.background=s==='SUBSCRIBED'?'var(--good)':'var(--warn)'})}function filters(){let a=S.profiles.filter(p=>p.active);$('personFilter').innerHTML='<option value="">Todos</option>'+a.map(p=>`<option value="${p.id}">${esc(p.full_name||p.email)}</option>`).join('');$('taskPerson').innerHTML=a.map(p=>`<option value="${p.id}">${esc(p.full_name||p.email)}</option>`).join('');let ar=[...new Set(S.tasks.map(t=>t.area).filter(Boolean))].sort();$('areaFilter').innerHTML='<option value="">Todas as áreas</option>'+ar.map(x=>`<option>${esc(x)}</option>`).join('')}function list(){let q=$('searchInput').value.trim().toLowerCase(),p=$('personFilter').value,pr=$('priorityFilter').value,a=$('areaFilter').value,d=today();return S.tasks.filter(t=>{let n=S.profiles.find(x=>x.id===t.assignee_id)?.full_name||'',txt=[t.title,t.area,t.expected_result,t.notes,n].join(' ').toLowerCase();if(q&&!txt.includes(q)||p&&t.assignee_id!==p||pr&&t.priority!==pr||a&&t.area!==a)return false;if(S.view==='today'&&t.due_date!==d||S.view==='late'&&!(t.due_date&&t.due_date<d&&t.status!=='done')||S.view==='critical'&&t.priority!=='critical'||S.view==='completed'&&t.status!=='done')return false;return true})}function render(){let d=today(),all=S.tasks,active=all.filter(t=>t.status!=='done').length,td=all.filter(t=>t.due_date===d&&t.status!=='done').length,late=all.filter(t=>t.due_date&&t.due_date<d&&t.status!=='done').length,done=all.filter(t=>t.status==='done').length;$('statActive').textContent=active;$('statToday').textContent=td;$('statLate').textContent=late;$('statRate').textContent=`${all.length?Math.round(done/all.length*100):0}%`;$('navAll').textContent=all.length;$('navToday').textContent=td;$('navLate').textContent=late;$('navCritical').textContent=all.filter(t=>t.priority==='critical'&&t.status!=='done').length;$('navCompleted').textContent=done;let data=list();$('board').innerHTML=COL.map(s=>{let l=data.filter(t=>t.status===s);return`<section class="column"><div class="column-head"><span>${SM[s]}</span><span>${l.length}</span></div><div class="column-body">${l.length?l.map(card).join(''):'<div class="empty">Sem tarefas</div>'}</div></section>`}).join('');document.querySelectorAll('.task-card').forEach(x=>x.onclick=()=>openTask(x.dataset.id))}function card(t){let p=S.profiles.find(x=>x.id===t.assignee_id),late=t.due_date&&t.due_date<today()&&t.status!=='done';return`<article class="task-card" data-id="${t.id}"><div class="task-title">${esc(t.title)}</div><div class="task-meta"><span class="tag ${t.priority}">${PM[t.priority]}</span>${t.area?`<span class="tag">${esc(t.area)}</span>`:''}</div><div class="task-person">${esc(p?.full_name||p?.email||'Sem responsável')}</div><div class="task-due ${late?'late':''}">${date(t.due_date,t.due_time)}</div></article>`}function clear(){['taskId','taskTitle','taskArea','taskDate','taskTime','taskExpected','taskNotes','taskQuantity','taskCompletionNote'].forEach(id=>$(id).value='');$('taskPriority').value='medium';$('taskStatus').value='todo';$('attachmentList').innerHTML='';$('auditList').innerHTML='';$('attachmentsSection').classList.add('hidden');$('auditSection').classList.add('hidden');$('deleteTaskBtn').style.display='none'}function lock(v){['taskTitle','taskPerson','taskArea','taskPriority','taskDate','taskTime','taskExpected'].forEach(id=>$(id).disabled=v);$('collaboratorNote').classList.toggle('hidden',!v)}function add(){clear();lock(false);$('taskDialogTitle').textContent='Nova tarefa';$('taskPerson').value=S.profile.id;$('taskDialog').showModal()}async function openTask(id){let t=S.tasks.find(x=>x.id===id);if(!t)return;clear();Object.entries({taskId:t.id,taskTitle:t.title||'',taskArea:t.area||'',taskPriority:t.priority,taskStatus:t.status,taskDate:t.due_date||'',taskTime:(t.due_time||'').slice(0,5),taskExpected:t.expected_result||'',taskNotes:t.notes||'',taskQuantity:t.quantity_done??'',taskCompletionNote:t.completion_note||''}).forEach(([k,v])=>$(k).value=v);$('taskPerson').value=t.assignee_id;$('taskDialogTitle').textContent=t.title;lock(!admin());$('deleteTaskBtn').style.display=admin()?'inline-block':'none';$('attachmentsSection').classList.remove('hidden');$('auditSection').classList.remove('hidden');$('taskDialog').showModal();await Promise.all([attachments(id),audit(id)])}async function save(){let id=$('taskId').value,title=$('taskTitle').value.trim(),assignee_id=$('taskPerson').value;if(!title||!assignee_id){toast('Preenche a tarefa e o colaborador.',true);return}let p=admin()?{title,assignee_id,area:$('taskArea').value.trim()||null,priority:$('taskPriority').value,status:$('taskStatus').value,due_date:$('taskDate').value||null,due_time:$('taskTime').value||null,expected_result:$('taskExpected').value.trim()||null,notes:$('taskNotes').value.trim()||null,quantity_done:$('taskQuantity').value||null,completion_note:$('taskCompletionNote').value.trim()||null}:{status:$('taskStatus').value,notes:$('taskNotes').value.trim()||null,quantity_done:$('taskQuantity').value||null,completion_note:$('taskCompletionNote').value.trim()||null};busy('A guardar…');let r=id?await sb.from('tasks').update(p).eq('id',id):await sb.from('tasks').insert(p);if(r.error){toast(r.error.message,true);synced();return}$('taskDialog').close();toast('Tarefa guardada.');await refresh()}async function del(){let id=$('taskId').value;if(!id||!confirm('Eliminar definitivamente esta tarefa?'))return;let{error}=await sb.from('tasks').delete().eq('id',id);if(error)return toast(error.message,true);$('taskDialog').close();toast('Tarefa eliminada.');await refresh()}async function attachments(id){let{data,error}=await sb.from('task_attachments').select('*').eq('task_id',id).order('created_at',{ascending:false});if(error)return;$('attachmentList').innerHTML=(data||[]).length?data.map(a=>`<div class="attachment-item"><button class="btn small" data-path="${esc(a.storage_path)}">Abrir</button> ${esc(a.file_name)} <small>${Math.round((a.file_size||0)/1024)} KB</small></div>`).join(''):'<div class="empty">Sem anexos</div>';$('attachmentList').querySelectorAll('button').forEach(b=>b.onclick=async()=>{let{data,error}=await sb.storage.from('task-evidence').createSignedUrl(b.dataset.path,60);if(error)return toast(error.message,true);window.open(data.signedUrl,'_blank','noopener')})}async function upload(){let id=$('taskId').value,f=$('attachmentFile').files[0];if(!id||!f)return toast('Seleciona um ficheiro.',true);if(f.size>6291456)return toast('O ficheiro excede 6 MB.',true);let safe=f.name.replace(/[^a-zA-Z0-9._-]/g,'_'),path=`${id}/${crypto.randomUUID()}-${safe}`;busy('A carregar anexo…');let r=await sb.storage.from('task-evidence').upload(path,f);if(r.error){synced();return toast(r.error.message,true)}r=await sb.from('task_attachments').insert({task_id:id,file_name:f.name,storage_path:path,mime_type:f.type,file_size:f.size});if(r.error){synced();return toast(r.error.message,true)}$('attachmentFile').value='';toast('Anexo carregado.');await attachments(id);synced()}async function audit(id){let{data,error}=await sb.from('task_events').select('*').eq('task_id',id).order('created_at',{ascending:false});if(error)return;$('auditList').innerHTML=(data||[]).map(e=>`<div class="audit-item"><strong>${e.action==='created'?'Tarefa criada':'Tarefa atualizada'}</strong>${e.old_status!==e.new_status?` — ${e.old_status?SM[e.old_status]:'—'} → ${SM[e.new_status]}`:''}<br><small>${new Intl.DateTimeFormat('pt-PT',{dateStyle:'short',timeStyle:'short'}).format(new Date(e.created_at))}</small></div>`).join('')||'<div class="empty">Sem histórico</div>'}async function people(){await refresh();$('peopleList').innerHTML=S.profiles.map(p=>`<div class="person-row"><div><strong>${esc(p.full_name||p.email)}</strong><br><small>${esc(p.email)} · ${p.role==='admin'?'Administrador':'Colaborador'} · ${p.active?'Ativo':'Inativo'}</small></div><button class="btn small" data-user="${p.id}" data-active="${!p.active}">${p.active?'Desativar':'Ativar'}</button></div>`).join('');$('peopleList').querySelectorAll('button').forEach(b=>b.onclick=async()=>{let{error}=await sb.from('profiles').update({active:b.dataset.active==='true'}).eq('id',b.dataset.user);if(error)return toast(error.message,true);await people()});$('inviteList').innerHTML=S.invitations.filter(i=>!i.accepted_at).map(i=>`<div class="person-row"><div><strong>${esc(i.full_name)}</strong><br><small>${esc(i.email)} · ${i.role}</small></div></div>`).join('')||'<div class="empty">Sem convites pendentes</div>'}async function invite(){let email=$('inviteEmail').value.trim().toLowerCase(),full_name=$('inviteName').value.trim();if(!email||!full_name)return toast('Preenche nome e email.',true);let{error}=await sb.from('invitations').upsert({email,full_name,department:$('inviteDepartment').value.trim()||null,role:$('inviteRole').value},{onConflict:'email'});if(error)return toast(error.message,true);['inviteEmail','inviteName','inviteDepartment'].forEach(id=>$(id).value='');toast('Email autorizado.');await people()}function csv(){let rows=[['Tarefa','Colaborador','Área','Prioridade','Estado','Data','Hora','Resultado esperado','Observações','Quantidade','Nota de conclusão'],...S.tasks.map(t=>{let p=S.profiles.find(x=>x.id===t.assignee_id);return[t.title,p?.full_name||p?.email||'',t.area||'',PM[t.priority],SM[t.status],t.due_date||'',(t.due_time||'').slice(0,5),t.expected_result||'',t.notes||'',t.quantity_done??'',t.completion_note||'']})],c=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(';')).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+c],{type:'text/csv'}));a.download=`tarefas_${today()}.csv`;a.click();URL.revokeObjectURL(a.href)}$('loginTab').onclick=()=>{$('loginPanel').classList.remove('hidden');$('registerPanel').classList.add('hidden');$('loginTab').classList.add('active');$('registerTab').classList.remove('active')};$('registerTab').onclick=()=>{$('registerPanel').classList.remove('hidden');$('loginPanel').classList.add('hidden');$('registerTab').classList.add('active');$('loginTab').classList.remove('active')};$('loginBtn').onclick=async()=>{msg('loginMessage','');let{data,error}=await sb.auth.signInWithPassword({email:$('loginEmail').value.trim(),password:$('loginPassword').value});if(error)return msg('loginMessage',error.message);await enter(data.session)};$('registerBtn').onclick=async()=>{let email=$('registerEmail').value.trim().toLowerCase(),password=$('registerPassword').value,full_name=$('registerName').value.trim();if(password.length<8)return msg('registerMessage','A palavra-passe deve ter pelo menos 8 caracteres.');let{data:i}=await sb.from('invitations').select('id').ilike('email',email).is('accepted_at',null).maybeSingle();if(!i)return msg('registerMessage','Este email ainda não foi autorizado.');let{error}=await sb.auth.signUp({email,password,options:{data:{full_name}}});if(error)return msg('registerMessage',error.message);msg('registerMessage','Conta criada. Confirma o email e depois entra.',true)};$('logoutBtn').onclick=async()=>{await sb.auth.signOut();location.reload()};$('refreshBtn').onclick=refresh;$('addTaskBtn').onclick=add;$('mobileAddBtn').onclick=add;$('saveTaskBtn').onclick=save;$('deleteTaskBtn').onclick=del;$('uploadAttachmentBtn').onclick=upload;$('peopleBtn').onclick=async()=>{$('peopleDialog').showModal();await people()};$('createInviteBtn').onclick=invite;$('refreshPeopleBtn').onclick=people;$('exportCsvBtn').onclick=csv;$('menuBtn').onclick=()=>$('sidebar').classList.toggle('open');document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());['searchInput','personFilter','priorityFilter','areaFilter'].forEach(id=>$(id).addEventListener(id==='searchInput'?'input':'change',render));$('resetFiltersBtn').onclick=()=>{['searchInput','personFilter','priorityFilter','areaFilter'].forEach(id=>$(id).value='');S.view='all';document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view==='all'));render()};$('nav').onclick=e=>{let b=e.target.closest('button[data-view]');if(!b)return;S.view=b.dataset.view;document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x===b));$('pageTitle').textContent=b.querySelector('span').textContent;render()};sb?.auth.onAuthStateChange((e,s)=>{if(e==='SIGNED_OUT'){S.session=null;S.profile=null;auth()}});boot().catch(e=>{console.error(e);toast('Erro ao iniciar a aplicação.',true);auth()});
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const $ = (id) => document.getElementById(id);
+const cfg = window.APP_CONFIG || {};
+const configured = /^https:\/\/.+\.supabase\.co$/.test(cfg.supabaseUrl || '') && (cfg.supabasePublishableKey || '').length > 20;
+const supabase = configured ? createClient(cfg.supabaseUrl, cfg.supabasePublishableKey, { auth: { persistSession: true, autoRefreshToken: true } }) : null;
+
+const state = { session: null, profile: null, profiles: [], tasks: [], invitations: [], view: 'all', channel: null };
+const statusMap = { todo: 'Por iniciar', in_progress: 'Em curso', review: 'A validar', done: 'Concluída' };
+const priorityMap = { low: 'Baixa', medium: 'Média', high: 'Alta', critical: 'Crítica' };
+const columns = ['todo', 'in_progress', 'review', 'done'];
+
+function toast(message, error = false) {
+  const el = $('toast');
+  el.textContent = message;
+  el.className = `toast show${error ? ' error' : ''}`;
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.className = 'toast'; }, 3000);
+}
+
+function setMessage(id, text, success = false) {
+  const el = $(id);
+  el.textContent = text || '';
+  el.className = `form-message${success ? ' success' : ''}`;
+}
+
+function localDate() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Lisbon' }).format(new Date());
+}
+
+function escapeHtml(value = '') {
+  return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+}
+
+function initials(value = '') {
+  return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
+}
+
+function formatDate(date, time) {
+  if (!date) return 'Sem prazo';
+  const options = { day: '2-digit', month: '2-digit', year: 'numeric', ...(time ? { hour: '2-digit', minute: '2-digit' } : {}) };
+  return new Intl.DateTimeFormat('pt-PT', options).format(new Date(`${date}T${time || '12:00'}`));
+}
+
+function isAdmin() {
+  return state.profile?.role === 'admin' && state.profile?.active;
+}
+
+function setBusy(text = 'A sincronizar…') { $('syncStatus').textContent = text; }
+function setSynced() { $('syncStatus').textContent = `Sincronizado às ${new Intl.DateTimeFormat('pt-PT', { hour: '2-digit', minute: '2-digit' }).format(new Date())}`; }
+
+function showAuth() {
+  $('loadingScreen').classList.add('hidden');
+  $('appShell').classList.add('hidden');
+  $('mobileTop').classList.add('hidden');
+  $('loginScreen').classList.remove('hidden');
+}
+
+function showApp() {
+  $('loadingScreen').classList.add('hidden');
+  $('loginScreen').classList.add('hidden');
+  $('appShell').classList.remove('hidden');
+  $('mobileTop').classList.remove('hidden');
+}
+
+async function boot() {
+  if (!configured) {
+    $('configWarning').classList.remove('hidden');
+    showAuth();
+    return;
+  }
+  const { data: { session } } = await supabase.auth.getSession();
+  session ? await enterApp(session) : showAuth();
+}
+
+async function enterApp(session) {
+  state.session = session;
+  const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+  if (error || !data) {
+    await supabase.auth.signOut();
+    showAuth();
+    setMessage('loginMessage', 'Perfil não encontrado. Contacta o administrador.');
+    return;
+  }
+  if (!data.active) {
+    await supabase.auth.signOut();
+    showAuth();
+    setMessage('loginMessage', 'A conta ainda não está ativa.');
+    return;
+  }
+  state.profile = data;
+  $('userName').textContent = data.full_name || data.email;
+  $('userRole').textContent = data.role === 'admin' ? 'Administrador' : data.department || 'Colaborador';
+  $('userAvatar').textContent = initials(data.full_name || data.email);
+  document.querySelectorAll('.admin-only').forEach((el) => el.classList.toggle('hidden', !isAdmin()));
+  showApp();
+  await refreshData();
+  subscribeRealtime();
+}
+
+async function refreshData() {
+  setBusy();
+  const queries = [supabase.from('tasks').select('*').order('created_at', { ascending: false })];
+  if (isAdmin()) queries.push(
+    supabase.from('profiles').select('*').order('full_name'),
+    supabase.from('invitations').select('*').order('created_at', { ascending: false })
+  );
+  const results = await Promise.all(queries);
+  const failed = results.find((result) => result.error);
+  if (failed) {
+    toast(failed.error.message, true);
+    setSynced();
+    return;
+  }
+  state.tasks = results[0].data || [];
+  if (isAdmin()) {
+    state.profiles = results[1].data || [];
+    state.invitations = results[2].data || [];
+  } else {
+    state.profiles = [state.profile];
+  }
+  populateFilters();
+  render();
+  setSynced();
+}
+
+function subscribeRealtime() {
+  if (state.channel) supabase.removeChannel(state.channel);
+  state.channel = supabase.channel('team-control-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, refreshData)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, refreshData)
+    .subscribe((status) => { $('connectionDot').style.background = status === 'SUBSCRIBED' ? 'var(--good)' : 'var(--warn)'; });
+}
+
+function populateFilters() {
+  const activeProfiles = state.profiles.filter((profile) => profile.active);
+  $('personFilter').innerHTML = '<option value="">Todos</option>' + activeProfiles.map((profile) => `<option value="${profile.id}">${escapeHtml(profile.full_name || profile.email)}</option>`).join('');
+  $('taskPerson').innerHTML = activeProfiles.map((profile) => `<option value="${profile.id}">${escapeHtml(profile.full_name || profile.email)}</option>`).join('');
+  const areas = [...new Set(state.tasks.map((task) => task.area).filter(Boolean))].sort();
+  $('areaFilter').innerHTML = '<option value="">Todas as áreas</option>' + areas.map((area) => `<option>${escapeHtml(area)}</option>`).join('');
+}
+
+function filteredTasks() {
+  const query = $('searchInput').value.trim().toLowerCase();
+  const person = $('personFilter').value;
+  const priority = $('priorityFilter').value;
+  const area = $('areaFilter').value;
+  const today = localDate();
+  return state.tasks.filter((task) => {
+    const personName = state.profiles.find((profile) => profile.id === task.assignee_id)?.full_name || '';
+    const searchText = [task.title, task.area, task.expected_result, task.notes, personName].join(' ').toLowerCase();
+    if ((query && !searchText.includes(query)) || (person && task.assignee_id !== person) || (priority && task.priority !== priority) || (area && task.area !== area)) return false;
+    if (state.view === 'today' && task.due_date !== today) return false;
+    if (state.view === 'late' && !(task.due_date && task.due_date < today && task.status !== 'done')) return false;
+    if (state.view === 'critical' && task.priority !== 'critical') return false;
+    if (state.view === 'completed' && task.status !== 'done') return false;
+    return true;
+  });
+}
+
+function render() {
+  const today = localDate();
+  const all = state.tasks;
+  const active = all.filter((task) => task.status !== 'done').length;
+  const dueToday = all.filter((task) => task.due_date === today && task.status !== 'done').length;
+  const late = all.filter((task) => task.due_date && task.due_date < today && task.status !== 'done').length;
+  const done = all.filter((task) => task.status === 'done').length;
+  $('statActive').textContent = active;
+  $('statToday').textContent = dueToday;
+  $('statLate').textContent = late;
+  $('statRate').textContent = `${all.length ? Math.round((done / all.length) * 100) : 0}%`;
+  $('navAll').textContent = all.length;
+  $('navToday').textContent = dueToday;
+  $('navLate').textContent = late;
+  $('navCritical').textContent = all.filter((task) => task.priority === 'critical' && task.status !== 'done').length;
+  $('navCompleted').textContent = done;
+  const data = filteredTasks();
+  $('board').innerHTML = columns.map((status) => {
+    const list = data.filter((task) => task.status === status);
+    return `<section class="column"><div class="column-head"><span>${statusMap[status]}</span><span>${list.length}</span></div><div class="column-body">${list.length ? list.map(taskCard).join('') : '<div class="empty">Sem tarefas</div>'}</div></section>`;
+  }).join('');
+  document.querySelectorAll('.task-card').forEach((card) => { card.onclick = () => openTask(card.dataset.id); });
+}
+
+function taskCard(task) {
+  const profile = state.profiles.find((item) => item.id === task.assignee_id);
+  const late = task.due_date && task.due_date < localDate() && task.status !== 'done';
+  return `<article class="task-card" data-id="${task.id}"><div class="task-title">${escapeHtml(task.title)}</div><div class="task-meta"><span class="tag ${task.priority}">${priorityMap[task.priority]}</span>${task.area ? `<span class="tag">${escapeHtml(task.area)}</span>` : ''}</div><div class="task-person">${escapeHtml(profile?.full_name || profile?.email || 'Sem responsável')}</div><div class="task-due ${late ? 'late' : ''}">${formatDate(task.due_date, task.due_time)}</div></article>`;
+}
+
+function clearTaskForm() {
+  ['taskId', 'taskTitle', 'taskArea', 'taskDate', 'taskTime', 'taskExpected', 'taskNotes', 'taskQuantity', 'taskCompletionNote'].forEach((id) => { $(id).value = ''; });
+  $('taskPriority').value = 'medium';
+  $('taskStatus').value = 'todo';
+  $('attachmentList').innerHTML = '';
+  $('auditList').innerHTML = '';
+  $('attachmentsSection').classList.add('hidden');
+  $('auditSection').classList.add('hidden');
+  $('deleteTaskBtn').style.display = 'none';
+}
+
+function lockTaskFields(locked) {
+  ['taskTitle', 'taskPerson', 'taskArea', 'taskPriority', 'taskDate', 'taskTime', 'taskExpected'].forEach((id) => { $(id).disabled = locked; });
+  $('collaboratorNote').classList.toggle('hidden', !locked);
+}
+
+function openNewTask() {
+  clearTaskForm();
+  lockTaskFields(false);
+  $('taskDialogTitle').textContent = 'Nova tarefa';
+  $('taskPerson').value = state.profile.id;
+  $('taskDialog').showModal();
+}
+
+async function openTask(id) {
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task) return;
+  clearTaskForm();
+  const fields = {
+    taskId: task.id,
+    taskTitle: task.title || '',
+    taskArea: task.area || '',
+    taskPriority: task.priority,
+    taskStatus: task.status,
+    taskDate: task.due_date || '',
+    taskTime: (task.due_time || '').slice(0, 5),
+    taskExpected: task.expected_result || '',
+    taskNotes: task.notes || '',
+    taskQuantity: task.quantity_done ?? '',
+    taskCompletionNote: task.completion_note || ''
+  };
+  Object.entries(fields).forEach(([idKey, value]) => { $(idKey).value = value; });
+  $('taskPerson').value = task.assignee_id;
+  $('taskDialogTitle').textContent = task.title;
+  lockTaskFields(!isAdmin());
+  $('deleteTaskBtn').style.display = isAdmin() ? 'inline-block' : 'none';
+  $('attachmentsSection').classList.remove('hidden');
+  $('auditSection').classList.remove('hidden');
+  $('taskDialog').showModal();
+  await Promise.all([loadAttachments(id), loadAudit(id)]);
+}
+
+async function saveTask() {
+  const id = $('taskId').value;
+  const title = $('taskTitle').value.trim();
+  const assignee_id = $('taskPerson').value;
+  if (!title || !assignee_id) { toast('Preenche a tarefa e o colaborador.', true); return; }
+  const payload = isAdmin() ? {
+    title,
+    assignee_id,
+    area: $('taskArea').value.trim() || null,
+    priority: $('taskPriority').value,
+    status: $('taskStatus').value,
+    due_date: $('taskDate').value || null,
+    due_time: $('taskTime').value || null,
+    expected_result: $('taskExpected').value.trim() || null,
+    notes: $('taskNotes').value.trim() || null,
+    quantity_done: $('taskQuantity').value || null,
+    completion_note: $('taskCompletionNote').value.trim() || null
+  } : {
+    status: $('taskStatus').value,
+    notes: $('taskNotes').value.trim() || null,
+    quantity_done: $('taskQuantity').value || null,
+    completion_note: $('taskCompletionNote').value.trim() || null
+  };
+  setBusy('A guardar…');
+  const result = id ? await supabase.from('tasks').update(payload).eq('id', id) : await supabase.from('tasks').insert(payload);
+  if (result.error) { toast(result.error.message, true); setSynced(); return; }
+  $('taskDialog').close();
+  toast('Tarefa guardada.');
+  await refreshData();
+}
+
+async function deleteTask() {
+  const id = $('taskId').value;
+  if (!id || !confirm('Eliminar definitivamente esta tarefa?')) return;
+  const { error } = await supabase.from('tasks').delete().eq('id', id);
+  if (error) { toast(error.message, true); return; }
+  $('taskDialog').close();
+  toast('Tarefa eliminada.');
+  await refreshData();
+}
+
+async function loadAttachments(taskId) {
+  const { data, error } = await supabase.from('task_attachments').select('*').eq('task_id', taskId).order('created_at', { ascending: false });
+  if (error) return;
+  $('attachmentList').innerHTML = (data || []).length ? data.map((attachment) => `<div class="attachment-item"><button class="btn small" data-path="${escapeHtml(attachment.storage_path)}">Abrir</button> ${escapeHtml(attachment.file_name)} <small>${Math.round((attachment.file_size || 0) / 1024)} KB</small></div>`).join('') : '<div class="empty">Sem anexos</div>';
+  $('attachmentList').querySelectorAll('button').forEach((button) => {
+    button.onclick = async () => {
+      const { data: signed, error: signError } = await supabase.storage.from('task-evidence').createSignedUrl(button.dataset.path, 60);
+      if (signError) { toast(signError.message, true); return; }
+      window.open(signed.signedUrl, '_blank', 'noopener');
+    };
+  });
+}
+
+async function uploadAttachment() {
+  const taskId = $('taskId').value;
+  const file = $('attachmentFile').files[0];
+  if (!taskId || !file) { toast('Seleciona um ficheiro.', true); return; }
+  if (file.size > 6291456) { toast('O ficheiro excede 6 MB.', true); return; }
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `${taskId}/${crypto.randomUUID()}-${safeName}`;
+  setBusy('A carregar anexo…');
+  let result = await supabase.storage.from('task-evidence').upload(path, file);
+  if (result.error) { setSynced(); toast(result.error.message, true); return; }
+  result = await supabase.from('task_attachments').insert({ task_id: taskId, file_name: file.name, storage_path: path, mime_type: file.type, file_size: file.size });
+  if (result.error) { setSynced(); toast(result.error.message, true); return; }
+  $('attachmentFile').value = '';
+  toast('Anexo carregado.');
+  await loadAttachments(taskId);
+  setSynced();
+}
+
+async function loadAudit(taskId) {
+  const { data, error } = await supabase.from('task_events').select('*').eq('task_id', taskId).order('created_at', { ascending: false });
+  if (error) return;
+  $('auditList').innerHTML = (data || []).map((event) => `<div class="audit-item"><strong>${event.action === 'created' ? 'Tarefa criada' : 'Tarefa atualizada'}</strong>${event.old_status !== event.new_status ? ` — ${event.old_status ? statusMap[event.old_status] : '—'} → ${statusMap[event.new_status]}` : ''}<br><small>${new Intl.DateTimeFormat('pt-PT', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(event.created_at))}</small></div>`).join('') || '<div class="empty">Sem histórico</div>';
+}
+
+async function openPeople() {
+  await refreshData();
+  $('peopleList').innerHTML = state.profiles.map((profile) => `<div class="person-row"><div><strong>${escapeHtml(profile.full_name || profile.email)}</strong><br><small>${escapeHtml(profile.email)} · ${profile.role === 'admin' ? 'Administrador' : 'Colaborador'} · ${profile.active ? 'Ativo' : 'Inativo'}</small></div><button class="btn small" data-user="${profile.id}" data-active="${!profile.active}">${profile.active ? 'Desativar' : 'Ativar'}</button></div>`).join('');
+  $('peopleList').querySelectorAll('button').forEach((button) => {
+    button.onclick = async () => {
+      const { error } = await supabase.from('profiles').update({ active: button.dataset.active === 'true' }).eq('id', button.dataset.user);
+      if (error) { toast(error.message, true); return; }
+      await openPeople();
+    };
+  });
+  $('inviteList').innerHTML = state.invitations.filter((invite) => !invite.accepted_at).map((invite) => `<div class="person-row"><div><strong>${escapeHtml(invite.full_name)}</strong><br><small>${escapeHtml(invite.email)} · ${invite.role}</small></div></div>`).join('') || '<div class="empty">Sem convites pendentes</div>';
+}
+
+async function createInvite() {
+  const email = $('inviteEmail').value.trim().toLowerCase();
+  const full_name = $('inviteName').value.trim();
+  if (!email || !full_name) { toast('Preenche nome e email.', true); return; }
+  const { error } = await supabase.from('invitations').upsert({ email, full_name, department: $('inviteDepartment').value.trim() || null, role: $('inviteRole').value }, { onConflict: 'email' });
+  if (error) { toast(error.message, true); return; }
+  ['inviteEmail', 'inviteName', 'inviteDepartment'].forEach((id) => { $(id).value = ''; });
+  toast('Email autorizado.');
+  await openPeople();
+}
+
+function exportCsv() {
+  const rows = [['Tarefa', 'Colaborador', 'Área', 'Prioridade', 'Estado', 'Data', 'Hora', 'Resultado esperado', 'Observações', 'Quantidade', 'Nota de conclusão'], ...state.tasks.map((task) => {
+    const profile = state.profiles.find((person) => person.id === task.assignee_id);
+    return [task.title, profile?.full_name || profile?.email || '', task.area || '', priorityMap[task.priority], statusMap[task.status], task.due_date || '', (task.due_time || '').slice(0, 5), task.expected_result || '', task.notes || '', task.quantity_done ?? '', task.completion_note || ''];
+  })];
+  const csv = rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(';')).join('\n');
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' }));
+  link.download = `tarefas_${localDate()}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+$('loginTab').onclick = () => {
+  $('loginPanel').classList.remove('hidden'); $('registerPanel').classList.add('hidden');
+  $('loginTab').classList.add('active'); $('registerTab').classList.remove('active');
+};
+$('registerTab').onclick = () => {
+  $('registerPanel').classList.remove('hidden'); $('loginPanel').classList.add('hidden');
+  $('registerTab').classList.add('active'); $('loginTab').classList.remove('active');
+};
+$('loginBtn').onclick = async () => {
+  setMessage('loginMessage', '');
+  const { data, error } = await supabase.auth.signInWithPassword({ email: $('loginEmail').value.trim(), password: $('loginPassword').value });
+  if (error) { setMessage('loginMessage', error.message); return; }
+  await enterApp(data.session);
+};
+$('registerBtn').onclick = async () => {
+  const email = $('registerEmail').value.trim().toLowerCase();
+  const password = $('registerPassword').value;
+  const full_name = $('registerName').value.trim();
+  if (password.length < 8) { setMessage('registerMessage', 'A palavra-passe deve ter pelo menos 8 caracteres.'); return; }
+  const { data: invite, error: inviteError } = await supabase.rpc('is_email_invited', { candidate_email: email });
+  if (inviteError) { setMessage('registerMessage', 'Não foi possível validar o convite. Tenta novamente.'); return; }
+  if (!invite) { setMessage('registerMessage', 'Este email ainda não foi autorizado.'); return; }
+  const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name } } });
+  if (error) { setMessage('registerMessage', error.message); return; }
+  setMessage('registerMessage', 'Conta criada. Confirma o email e depois entra.', true);
+};
+
+$('addTaskBtn').onclick = openNewTask;
+$('mobileAddBtn').onclick = openNewTask;
+$('saveTaskBtn').onclick = saveTask;
+$('deleteTaskBtn').onclick = deleteTask;
+$('uploadAttachmentBtn').onclick = uploadAttachment;
+$('peopleBtn').onclick = () => { $('peopleDialog').showModal(); openPeople(); };
+$('refreshPeopleBtn').onclick = openPeople;
+$('createInviteBtn').onclick = createInvite;
+$('exportCsvBtn').onclick = exportCsv;
+$('refreshBtn').onclick = refreshData;
+$('logoutBtn').onclick = async () => { await supabase.auth.signOut(); location.reload(); };
+$('menuBtn').onclick = () => { $('sidebar').classList.toggle('open'); };
+$('resetFiltersBtn').onclick = () => {
+  $('searchInput').value = ''; $('personFilter').value = ''; $('priorityFilter').value = ''; $('areaFilter').value = ''; render();
+};
+['searchInput', 'personFilter', 'priorityFilter', 'areaFilter'].forEach((id) => { $(id).oninput = render; $(id).onchange = render; });
+document.querySelectorAll('[data-close]').forEach((button) => { button.onclick = () => $(button.dataset.close).close(); });
+$('nav').querySelectorAll('button').forEach((button) => {
+  button.onclick = () => {
+    state.view = button.dataset.view;
+    $('nav').querySelectorAll('button').forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+    const labels = { all: 'Todas as tarefas', today: 'Para hoje', late: 'Em atraso', critical: 'Críticas', completed: 'Concluídas' };
+    $('pageTitle').textContent = labels[state.view];
+    $('sidebar').classList.remove('open');
+    render();
+  };
+});
+
+supabase?.auth.onAuthStateChange(async (event, session) => {
+  if (event === 'SIGNED_IN' && session && !state.profile) await enterApp(session);
+  if (event === 'SIGNED_OUT') showAuth();
+});
+
+boot();
