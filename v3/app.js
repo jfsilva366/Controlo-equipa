@@ -1,42 +1,262 @@
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-const cfg=window.APP_CONFIG||{};const supabase=createClient(cfg.supabaseUrl,cfg.supabasePublishableKey,{auth:{persistSession:true,autoRefreshToken:true}});const $=id=>document.getElementById(id);
-const state={session:null,profile:null,profiles:[],tasks:[],overtime:[],view:'dashboard',filter:'active',person:'all',search:'',installPrompt:null};
-const statusLabel={todo:'Por iniciar',in_progress:'Em curso',review:'Concluído',done:'Validado'};const priorityLabel={low:'Baixa',medium:'Média',high:'Alta',critical:'Crítica'};const overtimeLabel={pending:'Pendente',approved:'Aprovada',rejected:'Rejeitada'};
-const viewMeta={dashboard:['Dashboard','Visão imediata da operação.'],tasks:['Tarefas','Planeamento e acompanhamento diário.'],calendar:['Calendário','Agenda operacional dos próximos dias.'],overtime:['Horas Extra','Registo e aprovação de horas extra.'],validations:['Validações','Tarefas concluídas a aguardar validação.'],team:['Equipa','Gestão de utilizadores e carga de trabalho.'],more:['Mais','Instalação e estado da aplicação.']};
-const esc=(v='')=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const localDate=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Lisbon'}).format(new Date());const isAdmin=()=>state.profile?.role==='admin';const priorityScore=p=>({critical:4,high:3,medium:2,low:1}[p]||0);const profileName=id=>state.profiles.find(p=>p.id===id)?.full_name||state.profiles.find(p=>p.id===id)?.email||'Sem colaborador';
-function toast(m){const e=$('toast');e.textContent=m;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2800)}function show(id){['loading','login','app'].forEach(x=>$(x).classList.toggle('hidden',x!==id))}function initials(n='Atlas'){return n.split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase()}function formatDate(d){if(!d)return'Sem data';if(d===localDate())return'Hoje';return new Intl.DateTimeFormat('pt-PT',{day:'2-digit',month:'short'}).format(new Date(`${d}T12:00:00`))}
-async function boot(){if(!cfg.supabaseUrl||!cfg.supabasePublishableKey){$('loginError').textContent='Configuração Supabase em falta.';return show('login')}const{data:{session}}=await supabase.auth.getSession();if(!session)return show('login');await enter(session)}
-async function enter(session){state.session=session;const{data,error}=await supabase.from('profiles').select('*').eq('id',session.user.id).single();if(error||!data?.active){await supabase.auth.signOut();show('login');$('loginError').textContent='Acesso indisponível.';return}state.profile=data;$('profileName').textContent=data.full_name||data.email;$('profileRole').textContent=isAdmin()?'Administrador':'Colaborador';$('avatar').textContent=initials(data.full_name||data.email);$('welcomeTitle').textContent=`Olá, ${(data.full_name||data.email).split(' ')[0]}.`;$('todayLabel').textContent=new Intl.DateTimeFormat('pt-PT',{weekday:'long',day:'numeric',month:'long'}).format(new Date());document.querySelectorAll('.admin-only').forEach(el=>el.classList.toggle('hidden',!isAdmin()));show('app');await refresh();subscribe()}
-async function refresh(){const [tasks,profiles,overtime]=await Promise.all([supabase.from('tasks').select('*').order('created_at',{ascending:false}),supabase.from('profiles').select('*').order('full_name'),supabase.from('overtime_entries').select('*').order('work_date',{ascending:false})]);if(tasks.error||profiles.error||overtime.error){toast('Erro ao sincronizar dados.');return}state.tasks=tasks.data||[];state.profiles=profiles.data||[state.profile];state.overtime=overtime.data||[];render()}
-function subscribe(){supabase.channel('atlas-v03-live').on('postgres_changes',{event:'*',schema:'public',table:'tasks'},refresh).on('postgres_changes',{event:'*',schema:'public',table:'profiles'},refresh).on('postgres_changes',{event:'*',schema:'public',table:'overtime_entries'},refresh).subscribe(s=>{if($('syncStatus'))$('syncStatus').textContent=s==='SUBSCRIBED'?'Ligado ao Supabase em tempo real.':'A sincronizar…'})}
-function visibleTasks(){return state.tasks.filter(t=>isAdmin()||t.assignee_id===state.profile.id)}function visibleOvertime(){return state.overtime.filter(o=>isAdmin()||o.employee_id===state.profile.id)}
-function filteredTasks(){let list=visibleTasks(),d=localDate();if(state.person!=='all')list=list.filter(t=>t.assignee_id===state.person);if(state.filter==='active')list=list.filter(t=>!['done','review'].includes(t.status));if(state.filter==='today')list=list.filter(t=>t.due_date===d&&t.status!=='done');if(state.filter==='late')list=list.filter(t=>t.due_date&&t.due_date<d&&!['done','review'].includes(t.status));if(state.filter==='critical')list=list.filter(t=>t.priority==='critical'&&t.status!=='done');if(state.filter==='done')list=list.filter(t=>t.status==='done');if(state.search){const q=state.search.toLowerCase();list=list.filter(t=>[t.title,t.area,profileName(t.assignee_id)].some(v=>String(v||'').toLowerCase().includes(q)))}return list.sort((a,b)=>priorityScore(b.priority)-priorityScore(a.priority)||(a.due_date||'9999').localeCompare(b.due_date||'9999'))}
-function taskCard(t){const overdue=t.due_date&&t.due_date<localDate()&&!['done','review'].includes(t.status);return `<article class="task-card ${overdue?'overdue':''}" data-id="${t.id}"><div><div class="task-title">${esc(t.title)}</div><div class="task-meta">${t.task_scope==='global'?'<span class="pill global">Global</span>':''}<span class="pill ${t.priority}">${priorityLabel[t.priority]}</span><span class="pill ${t.status}">${statusLabel[t.status]}</span><span>${esc(profileName(t.assignee_id))}</span><span>${esc(t.area||'Sem departamento')}</span><span>${overdue?'Em atraso · ':''}${formatDate(t.due_date)}</span></div></div><span class="task-arrow">›</span></article>`}
-function bindCards(id){$(id)?.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>openTask(el.dataset.id))}
-function render(){const own=visibleTasks(),active=own.filter(t=>!['done','review'].includes(t.status)),late=active.filter(t=>t.due_date&&t.due_date<localDate()),review=own.filter(t=>t.status==='review'),done=own.filter(t=>t.status==='done'),pendingOt=visibleOvertime().filter(o=>o.status==='pending');$('statActive').textContent=active.length;$('statLate').textContent=late.length;$('statReview').textContent=review.length;$('statOvertime').textContent=pendingOt.length;$('navTasks').textContent=active.length;$('navReview').textContent=review.length;$('navOvertime').textContent=pendingOt.length;$('completionRate').textContent=`${own.length?Math.round(done.length/own.length*100):0}%`;const focus=[...active].sort((a,b)=>priorityScore(b.priority)-priorityScore(a.priority)||(a.due_date||'9999').localeCompare(b.due_date||'9999')).slice(0,5);$('priorityList').innerHTML=focus.map(taskCard).join('')||'<div class="empty">Sem prioridades pendentes.</div>';bindCards('priorityList');renderTasks();renderValidations();renderPeopleTabs();renderTeam();renderCalendar();renderOvertime()}
-function renderTasks(){const labels={active:'Tarefas ativas',today:'Tarefas de hoje',late:'Tarefas em atraso',critical:'Tarefas críticas',done:'Tarefas validadas'};$('listTitle').textContent=labels[state.filter]||'Tarefas';$('taskList').innerHTML=filteredTasks().map(taskCard).join('')||'<div class="empty">Sem tarefas neste filtro.</div>';bindCards('taskList');document.querySelectorAll('.quick-filters [data-filter]').forEach(b=>b.classList.toggle('active',b.dataset.filter===state.filter))}
-function renderValidations(){const list=visibleTasks().filter(t=>t.status==='review');$('validationList').innerHTML=list.map(taskCard).join('')||'<div class="empty">Não existem tarefas concluídas por validar.</div>';bindCards('validationList')}
-function renderPeopleTabs(){if(!isAdmin())return;const people=state.profiles.filter(p=>p.active&&p.role==='collaborator'),tabs=[{id:'all',name:'Todos'},...people.map(p=>({id:p.id,name:p.full_name||p.email}))];$('peopleTabs').innerHTML=tabs.map(p=>`<button class="${state.person===p.id?'active':''}" data-person="${p.id}">${esc(p.name)}</button>`).join('');$('peopleTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.person=b.dataset.person;renderPeopleTabs();renderTasks()})}
-function renderTeam(){if(!isAdmin())return;$('teamList').innerHTML=state.profiles.map(p=>{const active=state.tasks.filter(t=>t.assignee_id===p.id&&!['done','review'].includes(t.status)).length,late=state.tasks.filter(t=>t.assignee_id===p.id&&!['done','review'].includes(t.status)&&t.due_date&&t.due_date<localDate()).length;return `<article class="team-card"><div class="avatar">${initials(p.full_name||p.email)}</div><div><strong>${esc(p.full_name||p.email)}</strong><small>${esc(p.department||'Sem departamento')} · ${p.role==='admin'?'Administrador':'Colaborador'}</small></div><b>${active}</b><span>${late} em atraso · ${p.active?'Ativo':'Inativo'}</span><button class="toggle-user" data-user="${p.id}" data-active="${!p.active}">${p.active?'Desativar':'Ativar'}</button></article>`}).join('')||'<div class="empty">Sem utilizadores.</div>';$('teamList').querySelectorAll('[data-user]').forEach(b=>b.onclick=()=>toggleUser(b.dataset.user,b.dataset.active==='true'))}
-function renderCalendar(){const base=new Date(`${localDate()}T12:00:00`),days=[];for(let i=0;i<7;i++){const date=new Date(base);date.setDate(base.getDate()+i);const key=new Intl.DateTimeFormat('sv-SE').format(date),list=visibleTasks().filter(t=>t.due_date===key&&t.status!=='done');days.push(`<section class="calendar-day"><header><span>${i===0?'Hoje':new Intl.DateTimeFormat('pt-PT',{weekday:'short'}).format(date)}</span><b>${date.getDate()}</b></header><div>${list.map(t=>`<button data-id="${t.id}"><i class="dot ${t.priority}"></i><span>${esc(t.title)}</span><small>${esc(profileName(t.assignee_id))}</small></button>`).join('')||'<p>Sem tarefas</p>'}</div></section>`)}$('calendarGrid').innerHTML=days.join('');bindCards('calendarGrid')}
-function renderOvertime(){const list=visibleOvertime(),month=localDate().slice(0,7),monthRows=list.filter(o=>o.work_date.startsWith(month)),approved=monthRows.filter(o=>o.status==='approved').reduce((s,o)=>s+Number(o.hours),0),total=monthRows.reduce((s,o)=>s+Number(o.hours),0);$('otMonth').textContent=`${total.toFixed(2).replace('.00','')}h`;$('otPending').textContent=list.filter(o=>o.status==='pending').length;$('otApproved').textContent=`${approved.toFixed(2).replace('.00','')}h`;$('overtimeList').innerHTML=list.map(o=>`<article class="task-card" data-ot="${o.id}"><div><div class="task-title">${esc(profileName(o.employee_id))} · ${Number(o.hours)}h</div><div class="task-meta"><span class="pill ${o.status}">${overtimeLabel[o.status]}</span><span>${formatDate(o.work_date)}</span><span>${esc(o.work_done)}</span></div></div><span class="task-arrow">›</span></article>`).join('')||'<div class="empty">Sem registos de horas extra.</div>';$('overtimeList').querySelectorAll('[data-ot]').forEach(e=>e.onclick=()=>openOvertime(e.dataset.ot))}
-function setView(view){state.view=view;const[title,subtitle]=viewMeta[view]||viewMeta.dashboard;$('pageTitle').textContent=title;$('pageSubtitle').textContent=subtitle;document.querySelectorAll('.view').forEach(v=>v.classList.toggle('hidden',v.id!==`${view}View`));document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view))}
-function departments(){return[...new Set(state.profiles.map(p=>p.department).filter(Boolean).concat(state.tasks.map(t=>t.area).filter(Boolean)))].sort()}
-function populateTaskOptions(){const people=state.profiles.filter(p=>p.active&&p.role==='collaborator');$('taskPerson').innerHTML=people.map(p=>`<option value="${p.id}">${esc(p.full_name||p.email)}</option>`).join('');const deps=departments();$('taskDepartment').innerHTML=deps.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('')||'<option value="Logística">Logística</option>'}
-function setScope(scope){$('taskScope').value=scope;document.querySelectorAll('[data-scope]').forEach(b=>b.classList.toggle('active',b.dataset.scope===scope));$('personField').classList.toggle('hidden',scope==='global')}
-function resetTask(){$('taskId').value='';$('taskTitle').value='';$('taskPriority').value='medium';$('taskStatus').value='todo';$('taskDate').value=localDate();$('dialogTitle').textContent='Nova tarefa';$('deleteBtn').classList.add('hidden');$('validationActions').classList.add('hidden');$('saveTaskBtn').classList.remove('hidden');setScope('individual')}
-function openNew(){resetTask();populateTaskOptions();$('taskOwner').value=state.profile.full_name||state.profile.email;$('taskDialog').showModal()}
-function openTask(id){const t=state.tasks.find(x=>x.id===id);if(!t)return;resetTask();populateTaskOptions();$('taskId').value=t.id;$('taskTitle').value=t.title||'';$('taskPerson').value=t.assignee_id||'';$('taskDepartment').value=t.area||departments()[0]||'Logística';$('taskPriority').value=t.priority||'medium';$('taskDate').value=t.due_date||localDate();$('taskStatus').value=t.status||'todo';$('taskOwner').value=profileName(t.created_by);$('dialogTitle').textContent=t.title;$('deleteBtn').classList.toggle('hidden',!isAdmin());setScope(t.task_scope||'individual');const editable=isAdmin();['taskTitle','taskPerson','taskDepartment','taskPriority','taskDate'].forEach(x=>$(x).disabled=!editable);document.querySelector('.type-switch').classList.toggle('hidden',!editable||Boolean(t.id));const completed=t.status==='review'&&isAdmin();$('validationActions').classList.toggle('hidden',!completed);$('saveTaskBtn').classList.toggle('hidden',completed);if(!isAdmin()){[...$('taskStatus').options].forEach(o=>o.disabled=!((t.status==='todo'&&['todo','in_progress'].includes(o.value))||(t.status==='in_progress'&&['in_progress','review'].includes(o.value))||(t.status==='review'&&o.value==='review')))}$('taskDialog').showModal()}
-async function saveTask(){const id=$('taskId').value,common={title:$('taskTitle').value.trim(),area:$('taskDepartment').value,priority:$('taskPriority').value,due_date:$('taskDate').value,status:$('taskStatus').value};if(!common.title)return toast('Indica a tarefa.');if(!isAdmin()){const current=state.tasks.find(t=>t.id===id),allowed=(current.status==='todo'&&['todo','in_progress'].includes(common.status))||(current.status==='in_progress'&&['in_progress','review'].includes(common.status))||current.status===common.status;if(!allowed)return toast('Alteração de estado não permitida.');const{error}=await supabase.from('tasks').update({status:common.status,completed_at:common.status==='review'?new Date().toISOString():null}).eq('id',id);if(error)return toast(error.message);$('taskDialog').close();toast(common.status==='review'?'Tarefa concluída e enviada para validação.':'Estado atualizado.');return refresh()}if(id){const payload={...common,assignee_id:$('taskPerson').value};const{error}=await supabase.from('tasks').update(payload).eq('id',id);if(error)return toast(error.message)}else if($('taskScope').value==='global'){const people=state.profiles.filter(p=>p.active&&p.role==='collaborator');if(!people.length)return toast('Não existem colaboradores ativos.');const group=crypto.randomUUID(),{error}=await supabase.from('tasks').insert(people.map(p=>({...common,assignee_id:p.id,created_by:state.profile.id,task_scope:'global',global_group_id:group})));if(error)return toast(error.message)}else{const{error}=await supabase.from('tasks').insert({...common,assignee_id:$('taskPerson').value,created_by:state.profile.id,task_scope:'individual'});if(error)return toast(error.message)}$('taskDialog').close();toast('Tarefa guardada.');await refresh()}
-async function validateTask(valid){const id=$('taskId').value,payload=valid?{status:'done',validated_by:state.profile.id}:{status:'in_progress',validated_by:null,completed_at:null};const{error}=await supabase.from('tasks').update(payload).eq('id',id);if(error)return toast(error.message);$('taskDialog').close();toast(valid?'Tarefa validada.':'Tarefa rejeitada e devolvida para Em curso.');refresh()}
-async function deleteTask(){const id=$('taskId').value;if(!id||!confirm('Eliminar esta tarefa?'))return;const task=state.tasks.find(t=>t.id===id);let q=supabase.from('tasks').delete();q=task?.task_scope==='global'&&task.global_group_id?q.eq('global_group_id',task.global_group_id):q.eq('id',id);const{error}=await q;if(error)return toast(error.message);$('taskDialog').close();toast('Tarefa eliminada.');refresh()}
-async function inviteUser(e){e.preventDefault();const{data:{session}}=await supabase.auth.getSession(),payload={full_name:$('userFullName').value.trim(),email:$('userEmail').value.trim(),department:$('userDepartment').value.trim(),role:$('userRole').value};const r=await fetch(`${cfg.supabaseUrl}/functions/v1/invite-team-member`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`,'apikey':cfg.supabasePublishableKey},body:JSON.stringify(payload)}),body=await r.json();if(!r.ok)return toast(body.error||'Não foi possível criar o acesso.');$('userDialog').close();$('userForm').reset();toast('Convite enviado.');refresh()}
-async function toggleUser(id,active){if(id===state.profile.id&&!active)return toast('Não podes desativar a tua própria conta.');const{error}=await supabase.from('profiles').update({active}).eq('id',id);if(error)return toast(error.message);toast(active?'Utilizador ativado.':'Utilizador desativado.');refresh()}
-function populateOvertimePeople(){$('overtimePerson').innerHTML=state.profiles.filter(p=>p.active&&p.role==='collaborator').map(p=>`<option value="${p.id}">${esc(p.full_name||p.email)}</option>`).join('')}
-function resetOvertime(){$('overtimeId').value='';$('overtimeDate').value=localDate();$('overtimeHours').value='';$('overtimeWork').value='';$('overtimeStatus').value='Pendente';$('overtimeTitle').textContent='Novo registo';$('deleteOvertimeBtn').classList.add('hidden');$('overtimeReviewActions').classList.add('hidden');$('saveOvertimeBtn').classList.remove('hidden');populateOvertimePeople();if(isAdmin())$('overtimePerson').value=state.profiles.find(p=>p.role==='collaborator'&&p.active)?.id||''}
-function openNewOvertime(){resetOvertime();$('overtimeDialog').showModal()}
-function openOvertime(id){const o=state.overtime.find(x=>x.id===id);if(!o)return;resetOvertime();$('overtimeId').value=o.id;$('overtimePerson').value=o.employee_id;$('overtimeDate').value=o.work_date;$('overtimeHours').value=o.hours;$('overtimeWork').value=o.work_done;$('overtimeStatus').value=overtimeLabel[o.status];$('overtimeTitle').textContent=`${profileName(o.employee_id)} · ${o.hours}h`;const canEdit=isAdmin()||o.status==='pending';['overtimePerson','overtimeDate','overtimeHours','overtimeWork'].forEach(x=>$(x).disabled=!canEdit);$('deleteOvertimeBtn').classList.toggle('hidden',!canEdit);$('overtimeReviewActions').classList.toggle('hidden',!(isAdmin()&&o.status==='pending'));$('saveOvertimeBtn').classList.toggle('hidden',!canEdit||isAdmin()&&o.status==='pending');$('overtimeDialog').showModal()}
-async function saveOvertime(){const id=$('overtimeId').value,payload={employee_id:isAdmin()?$('overtimePerson').value:state.profile.id,work_date:$('overtimeDate').value,hours:Number($('overtimeHours').value),work_done:$('overtimeWork').value.trim(),created_by:state.profile.id};if(!payload.hours||!payload.work_done)return toast('Preenche as horas e o trabalho realizado.');const r=id?await supabase.from('overtime_entries').update(payload).eq('id',id):await supabase.from('overtime_entries').insert(payload);if(r.error)return toast(r.error.message);$('overtimeDialog').close();toast('Horas extra guardadas.');refresh()}
-async function reviewOvertime(status){const{error}=await supabase.from('overtime_entries').update({status,reviewed_by:state.profile.id,reviewed_at:new Date().toISOString()}).eq('id',$('overtimeId').value);if(error)return toast(error.message);$('overtimeDialog').close();toast(status==='approved'?'Horas extra aprovadas.':'Horas extra rejeitadas.');refresh()}
-async function deleteOvertime(){if(!$('overtimeId').value||!confirm('Eliminar este registo?'))return;const{error}=await supabase.from('overtime_entries').delete().eq('id',$('overtimeId').value);if(error)return toast(error.message);$('overtimeDialog').close();toast('Registo eliminado.');refresh()}
-$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';const{data,error}=await supabase.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(error)return $('loginError').textContent='Email ou palavra-passe incorretos.';enter(data.session)};$('newTaskBtn').onclick=$('mobileAddBtn').onclick=openNew;$('taskForm').onsubmit=e=>{e.preventDefault();saveTask()};$('deleteBtn').onclick=deleteTask;$('validateTaskBtn').onclick=()=>validateTask(true);$('rejectTaskBtn').onclick=()=>validateTask(false);$('inviteUserBtn').onclick=()=>$('userDialog').showModal();$('userForm').onsubmit=inviteUser;$('newOvertimeBtn').onclick=openNewOvertime;$('overtimeForm').onsubmit=e=>{e.preventDefault();saveOvertime()};$('approveOvertimeBtn').onclick=()=>reviewOvertime('approved');$('rejectOvertimeBtn').onclick=()=>reviewOvertime('rejected');$('deleteOvertimeBtn').onclick=deleteOvertime;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(`${b.dataset.close}`).close());document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view));document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;setView('tasks');renderTasks()});document.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>setScope(b.dataset.scope));$('searchInput').oninput=e=>{state.search=e.target.value.trim();renderTasks()};$('themeBtn').onclick=()=>{document.body.classList.toggle('light');localStorage.setItem('atlas-theme',document.body.classList.contains('light')?'light':'dark')};$('logoutBtn').onclick=async()=>{await supabase.auth.signOut();location.reload()};window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.installPrompt=e;$('installBtn').classList.remove('hidden')});$('installBtn').onclick=async()=>{if(!state.installPrompt)return;state.installPrompt.prompt();await state.installPrompt.userChoice;state.installPrompt=null;$('installBtn').classList.add('hidden')};if(localStorage.getItem('atlas-theme')==='light')document.body.classList.add('light');if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));boot();
+import { $, supabase, state, STATUS, VIEW_META, isAdmin, today, initials, profileName, toast, showScreen } from './js/core.js';
+import { loadProfile, refreshData, subscribeRealtime, saveTask, saveGlobalTasks, deleteTaskRecord, saveOvertime, deleteOvertimeRecord, inviteUser, setUserActive } from './js/data.js';
+import { renderAll, visibleTasks } from './js/render.js';
+
+function setView(view){
+  state.view=view;
+  const [title,subtitle]=VIEW_META[view]||VIEW_META.dashboard;
+  $('pageTitle').textContent=title;
+  $('pageSubtitle').textContent=subtitle;
+  document.querySelectorAll('.view').forEach(element=>element.classList.toggle('hidden',element.id!==`${view}View`));
+  document.querySelectorAll('[data-view]').forEach(button=>button.classList.toggle('active',button.dataset.view===view));
+  const showTaskAction=view==='tasks'&&isAdmin();
+  $('newTaskBtn').classList.toggle('hidden',!showTaskAction);
+  $('mobileAddBtn').classList.toggle('hidden',!showTaskAction);
+}
+
+async function refreshAndRender(){
+  if(await refreshData()){
+    renderAll();
+    bindDynamicEvents();
+  }
+}
+
+async function enter(session){
+  const profile=await loadProfile(session);
+  if(!profile){
+    await supabase.auth.signOut();
+    showScreen('login');
+    $('loginError').textContent='Acesso indisponível.';
+    return;
+  }
+  $('profileName').textContent=profile.full_name||profile.email;
+  $('profileRole').textContent=profile.role==='admin'?'Administrador':'Colaborador';
+  $('avatar').textContent=initials(profile.full_name||profile.email);
+  $('greeting').textContent=`Bom dia, ${(profile.full_name||profile.email).split(' ')[0]}.`;
+  $('currentDate').textContent=new Intl.DateTimeFormat('pt-PT',{weekday:'long',day:'numeric',month:'long'}).format(new Date());
+  document.querySelectorAll('.admin-only').forEach(element=>element.classList.toggle('hidden',!isAdmin()));
+  showScreen('app');
+  setView('dashboard');
+  await refreshAndRender();
+  subscribeRealtime(refreshAndRender);
+}
+
+async function boot(){
+  if(!window.APP_CONFIG?.supabaseUrl||!window.APP_CONFIG?.supabasePublishableKey){
+    showScreen('login');
+    $('loginError').textContent='Configuração Supabase em falta.';
+    return;
+  }
+  const {data:{session}}=await supabase.auth.getSession();
+  if(!session) return showScreen('login');
+  await enter(session);
+}
+
+function departments(){
+  return [...new Set(state.profiles.map(profile=>profile.department).filter(Boolean).concat(state.tasks.map(task=>task.area).filter(Boolean)))].sort();
+}
+function populateTaskOptions(){
+  const people=state.profiles.filter(profile=>profile.active&&profile.role==='collaborator');
+  $('taskPerson').innerHTML=people.map(person=>`<option value="${person.id}">${person.full_name||person.email}</option>`).join('');
+  const list=departments();
+  $('taskDepartment').innerHTML=(list.length?list:['Logística']).map(department=>`<option value="${department}">${department}</option>`).join('');
+}
+function setScope(scope){
+  $('taskScope').value=scope;
+  document.querySelectorAll('[data-scope]').forEach(button=>button.classList.toggle('active',button.dataset.scope===scope));
+  $('personField').classList.toggle('hidden',scope==='global');
+}
+function resetTaskForm(){
+  $('taskId').value='';
+  $('taskTitle').value='';
+  $('taskPriority').value='medium';
+  $('taskDate').value=today();
+  $('taskStatus').value='todo';
+  $('taskOwner').value=state.profile.full_name||state.profile.email;
+  $('dialogTitle').textContent='Nova tarefa';
+  $('deleteTaskBtn').classList.add('hidden');
+  $('validationActions').classList.add('hidden');
+  $('saveTaskBtn').classList.remove('hidden');
+  setScope('individual');
+}
+function openNewTask(){
+  resetTaskForm();
+  populateTaskOptions();
+  ['taskTitle','taskPerson','taskDepartment','taskPriority','taskDate','taskStatus'].forEach(id=>$(id).disabled=false);
+  document.querySelector('.type-switch').classList.remove('hidden');
+  $('taskDialog').showModal();
+}
+function openTask(id){
+  const task=state.tasks.find(item=>item.id===id);
+  if(!task)return;
+  resetTaskForm();
+  populateTaskOptions();
+  $('taskId').value=task.id;
+  $('taskTitle').value=task.title||'';
+  $('taskPerson').value=task.assignee_id||'';
+  $('taskDepartment').value=task.area||departments()[0]||'Logística';
+  $('taskPriority').value=task.priority||'medium';
+  $('taskDate').value=task.due_date||today();
+  $('taskStatus').value=task.status||'todo';
+  $('taskOwner').value=profileName(task.created_by);
+  $('dialogTitle').textContent=task.title;
+  setScope(task.task_scope||'individual');
+  document.querySelector('.type-switch').classList.add('hidden');
+  $('deleteTaskBtn').classList.toggle('hidden',!isAdmin());
+  $('validationActions').classList.toggle('hidden',!(isAdmin()&&task.status==='review'));
+  const editable=isAdmin();
+  ['taskTitle','taskPerson','taskDepartment','taskPriority','taskDate'].forEach(field=>$(field).disabled=!editable);
+  if(!isAdmin()){
+    const allowed=task.status==='todo'?['todo','in_progress']:task.status==='in_progress'?['in_progress','review']:[task.status];
+    [...$('taskStatus').options].forEach(option=>option.disabled=!allowed.includes(option.value));
+  } else {
+    [...$('taskStatus').options].forEach(option=>option.disabled=false);
+  }
+  $('taskDialog').showModal();
+}
+
+async function submitTask(){
+  const id=$('taskId').value;
+  const common={title:$('taskTitle').value.trim(),area:$('taskDepartment').value,priority:$('taskPriority').value,due_date:$('taskDate').value,status:$('taskStatus').value};
+  if(!common.title)return toast('Indica a tarefa.');
+  if(!isAdmin()){
+    const current=state.tasks.find(task=>task.id===id);
+    const allowed=current.status==='todo'&&common.status==='in_progress'||current.status==='in_progress'&&common.status==='review'||current.status===common.status;
+    if(!allowed)return toast('Transição de estado não permitida.');
+    const payload={status:common.status,completed_at:common.status==='review'?new Date().toISOString():null};
+    const {error}=await saveTask(payload,id);
+    if(error)return toast(error.message);
+  } else if(id){
+    const payload={...common,assignee_id:$('taskPerson').value};
+    if(common.status==='done')payload.validated_by=state.profile.id;
+    const {error}=await saveTask(payload,id);
+    if(error)return toast(error.message);
+  } else if($('taskScope').value==='global'){
+    const people=state.profiles.filter(profile=>profile.active&&profile.role==='collaborator');
+    if(!people.length)return toast('Não existem colaboradores ativos.');
+    const group=crypto.randomUUID();
+    const rows=people.map(person=>({...common,assignee_id:person.id,created_by:state.profile.id,task_scope:'global',global_group_id:group}));
+    const {error}=await saveGlobalTasks(rows);
+    if(error)return toast(error.message);
+  } else {
+    const {error}=await saveTask({...common,assignee_id:$('taskPerson').value,created_by:state.profile.id,task_scope:'individual'});
+    if(error)return toast(error.message);
+  }
+  $('taskDialog').close();
+  toast('Tarefa guardada.');
+  await refreshAndRender();
+}
+async function validateTask(valid){
+  const id=$('taskId').value;
+  const payload=valid?{status:'done',validated_by:state.profile.id}:{status:'in_progress',validated_by:null,completed_at:null};
+  const {error}=await saveTask(payload,id);
+  if(error)return toast(error.message);
+  $('taskDialog').close();
+  toast(valid?'Tarefa validada.':'Tarefa devolvida para execução.');
+  await refreshAndRender();
+}
+async function deleteTask(){
+  const task=state.tasks.find(item=>item.id===$('taskId').value);
+  if(!task||!confirm('Eliminar esta tarefa?'))return;
+  const {error}=await deleteTaskRecord(task);
+  if(error)return toast(error.message);
+  $('taskDialog').close();
+  toast('Tarefa eliminada.');
+  await refreshAndRender();
+}
+
+function populateOvertimePeople(){
+  const people=state.profiles.filter(profile=>profile.active&&profile.role==='collaborator');
+  $('overtimePerson').innerHTML=people.map(person=>`<option value="${person.id}">${person.full_name||person.email}</option>`).join('');
+}
+function openNewOvertime(){
+  populateOvertimePeople();
+  $('overtimeId').value='';
+  $('overtimePerson').value=isAdmin()?(state.profiles.find(profile=>profile.role==='collaborator'&&profile.active)?.id||''):state.profile.id;
+  $('overtimeDate').value=today();
+  $('overtimeHours').value='';
+  $('overtimeWork').value='';
+  $('overtimeStatus').value='Pendente';
+  $('overtimeReviewActions').classList.add('hidden');
+  $('deleteOvertimeBtn').classList.add('hidden');
+  $('overtimeDialog').showModal();
+}
+function openOvertime(id){
+  const item=state.overtime.find(entry=>entry.id===id);if(!item)return;
+  populateOvertimePeople();
+  $('overtimeId').value=item.id;
+  $('overtimePerson').value=item.employee_id;
+  $('overtimeDate').value=item.work_date;
+  $('overtimeHours').value=item.hours;
+  $('overtimeWork').value=item.work_done;
+  $('overtimeStatus').value=item.status==='approved'?'Aprovada':item.status==='rejected'?'Rejeitada':'Pendente';
+  $('overtimeReviewActions').classList.toggle('hidden',!(isAdmin()&&item.status==='pending'));
+  $('deleteOvertimeBtn').classList.toggle('hidden',!isAdmin());
+  $('overtimePerson').disabled=!isAdmin();
+  $('overtimeDialog').showModal();
+}
+async function submitOvertime(){
+  const id=$('overtimeId').value;
+  const employeeId=isAdmin()?$('overtimePerson').value:state.profile.id;
+  const payload={employee_id:employeeId,work_date:$('overtimeDate').value,hours:Number($('overtimeHours').value),work_done:$('overtimeWork').value.trim(),created_by:state.profile.id};
+  if(!payload.hours||!payload.work_done)return toast('Preenche as horas e o trabalho realizado.');
+  if(!id)payload.status='pending';
+  const {error}=await saveOvertime(payload,id);
+  if(error)return toast(error.message);
+  $('overtimeDialog').close();toast('Registo guardado.');await refreshAndRender();
+}
+async function reviewOvertime(status){
+  const id=$('overtimeId').value;
+  const {error}=await saveOvertime({status,reviewed_by:state.profile.id,reviewed_at:new Date().toISOString()},id);
+  if(error)return toast(error.message);
+  $('overtimeDialog').close();toast(status==='approved'?'Horas extra aprovadas.':'Horas extra rejeitadas.');await refreshAndRender();
+}
+async function deleteOvertime(){
+  const id=$('overtimeId').value;if(!id||!confirm('Eliminar este registo?'))return;
+  const {error}=await deleteOvertimeRecord(id);if(error)return toast(error.message);
+  $('overtimeDialog').close();toast('Registo eliminado.');await refreshAndRender();
+}
+
+async function submitUser(){
+  const payload={full_name:$('userFullName').value.trim(),email:$('userEmail').value.trim(),department:$('userDepartment').value.trim(),role:$('userRole').value};
+  const {data,error}=await inviteUser(payload);
+  if(error||data?.error)return toast(data?.error||error.message);
+  $('userDialog').close();$('userForm').reset();toast('Convite enviado.');await refreshAndRender();
+}
+async function toggleUser(id,active){
+  const {error}=await setUserActive(id,!active);if(error)return toast(error.message);
+  toast(active?'Utilizador desativado.':'Utilizador ativado.');await refreshAndRender();
+}
+
+function bindDynamicEvents(){
+  document.querySelectorAll('[data-task-id]').forEach(element=>element.onclick=()=>openTask(element.dataset.taskId));
+  document.querySelectorAll('[data-overtime-id]').forEach(element=>element.onclick=()=>openOvertime(element.dataset.overtimeId));
+  document.querySelectorAll('[data-person]').forEach(button=>button.onclick=()=>{state.person=button.dataset.person;renderAll();bindDynamicEvents();});
+  document.querySelectorAll('[data-toggle-user]').forEach(button=>button.onclick=()=>toggleUser(button.dataset.toggleUser,button.dataset.active==='true'));
+}
+
+$('loginForm').onsubmit=async event=>{event.preventDefault();$('loginError').textContent='';const{data,error}=await supabase.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(error)return $('loginError').textContent='Email ou palavra-passe incorretos.';await enter(data.session)};
+document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>setView(button.dataset.view));
+document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{state.filter=button.dataset.filter;setView('tasks');renderAll();bindDynamicEvents();});
+document.querySelectorAll('[data-scope]').forEach(button=>button.onclick=()=>setScope(button.dataset.scope));
+document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
+$('newTaskBtn').onclick=$('mobileAddBtn').onclick=openNewTask;
+$('taskForm').onsubmit=event=>{event.preventDefault();submitTask();};
+$('validateTaskBtn').onclick=()=>validateTask(true);
+$('rejectTaskBtn').onclick=()=>validateTask(false);
+$('deleteTaskBtn').onclick=deleteTask;
+$('newOvertimeBtn').onclick=openNewOvertime;
+$('overtimeForm').onsubmit=event=>{event.preventDefault();submitOvertime();};
+$('approveOvertimeBtn').onclick=()=>reviewOvertime('approved');
+$('rejectOvertimeBtn').onclick=()=>reviewOvertime('rejected');
+$('deleteOvertimeBtn').onclick=deleteOvertime;
+$('inviteUserBtn').onclick=()=>$('userDialog').showModal();
+$('userForm').onsubmit=event=>{event.preventDefault();submitUser();};
+$('searchInput').oninput=event=>{state.search=event.target.value.trim();renderAll();bindDynamicEvents();};
+$('themeBtn').onclick=()=>{document.body.classList.toggle('light');localStorage.setItem('atlas-theme',document.body.classList.contains('light')?'light':'dark');};
+$('logoutBtn').onclick=async()=>{await supabase.auth.signOut();location.reload();};
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();state.installPrompt=event;$('installBtn').classList.remove('hidden');});
+$('installBtn').onclick=async()=>{if(!state.installPrompt)return;state.installPrompt.prompt();await state.installPrompt.userChoice;state.installPrompt=null;$('installBtn').classList.add('hidden');};
+if(localStorage.getItem('atlas-theme')==='light')document.body.classList.add('light');
+if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
+boot();
