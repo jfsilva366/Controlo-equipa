@@ -1,10 +1,259 @@
-<!doctype html><html lang="pt-PT"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f4efe7"><title>Polo Logístico</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="collaborator-workflow.css"><link rel="stylesheet" href="warm-theme.css"><link rel="stylesheet" href="collaborator-dashboard.css"><link rel="stylesheet" href="admin-dashboard-v3.css"></head><body>
-<div id="loadingScreen" class="loading-screen"><div>A iniciar sistema<div class="loader"></div></div></div>
-<section id="loginScreen" class="login-screen hidden"><div class="login-shell"><div class="login-brand"><div><div class="eyebrow">Operação logística</div><h1>POLO<br>LOGÍSTICO</h1><p>Planeamento, execução e validação em tempo real.</p></div><small class="muted">Sistema interno · JF Almeida</small></div><div class="auth-card"><div id="configWarning" class="warning hidden">Configuração Supabase em falta.</div><div class="tabs"><button id="loginTab" class="active">Entrar</button><button id="registerTab" class="hidden">Ativar convite</button></div><div id="loginPanel"><div class="field"><label>Email</label><input id="loginEmail" type="email" autocomplete="email"></div><div class="field"><label>Palavra-passe</label><input id="loginPassword" type="password" autocomplete="current-password"></div><button id="loginBtn" class="btn primary block">Entrar</button><div id="loginMessage" class="form-message"></div></div><div id="registerPanel" class="hidden"><div class="access-note">Define uma palavra-passe para concluir a ativação do acesso enviado pelo diretor.</div><div class="field hidden"><label>Nome</label><input id="registerName"></div><div class="field hidden"><label>Email autorizado</label><input id="registerEmail" type="email"></div><div class="field"><label>Nova palavra-passe</label><input id="registerPassword" type="password" autocomplete="new-password"></div><button id="registerBtn" class="btn primary block">Definir palavra-passe e entrar</button><div id="registerMessage" class="form-message"></div></div></div></div></section>
-<header id="mobileTop" class="mobile-top hidden"><button id="menuBtn" class="btn small">Menu</button><strong>POLO LOGÍSTICO</strong><button id="mobileAddBtn" class="btn primary small admin-only">+ Tarefa</button></header>
-<div id="appShell" class="app-shell hidden"><aside id="sidebar" class="sidebar"><div class="brand">POLO LOGÍSTICO<span>.</span></div><div class="user-card"><div id="userAvatar" class="avatar">JL</div><div><div id="userName" class="user-name"></div><div id="userRole" class="user-role"></div><div class="sync"><i id="connectionDot" class="dot"></i><span id="syncStatus">A ligar…</span></div></div></div><nav id="nav" class="nav"><button class="active" data-view="all"><span>Todas as tarefas</span><b id="navAll">0</b></button><button data-view="today"><span>Para hoje</span><b id="navToday">0</b></button><button data-view="late"><span>Em atraso</span><b id="navLate">0</b></button><button data-view="critical"><span>Críticas</span><b id="navCritical">0</b></button><button data-view="completed"><span>Concluídas</span><b id="navCompleted">0</b></button></nav><div class="side-bottom"><button id="teamDashboardBtn" class="side-action admin-only">Desempenho da equipa</button><button id="peopleBtn" class="side-action admin-only">Gestão de acessos</button><button id="themeBtn" class="side-action"><span>Tema</span><b id="themeLabel">Elegante</b></button><button id="exportCsvBtn" class="side-action admin-only">Exportar CSV</button><button id="refreshBtn" class="side-action">Atualizar</button><button id="logoutBtn" class="side-action">Terminar sessão</button></div></aside>
-<main class="main"><div class="topbar"><div><div class="eyebrow">Centro operacional</div><h2 id="pageTitle">Todas as tarefas</h2><p id="pageSubtitle">Acompanhar prioridades, execução e validação.</p></div><div class="actions"><button id="resetFiltersBtn" class="btn">Limpar filtros</button><button id="addTaskBtn" class="btn primary admin-only">+ Nova tarefa</button></div></div><section class="stats"><div class="stat"><span>Ativas</span><b id="statActive">0</b></div><div class="stat"><span>Hoje</span><b id="statToday">0</b></div><div class="stat"><span>Em atraso</span><b id="statLate">0</b></div><div class="stat"><span>Taxa concluída</span><b id="statRate">0%</b></div></section><section id="workloadAlert" class="warning admin-only hidden workload-alert"></section><section class="filters"><input id="searchInput" placeholder="Pesquisar tarefa"><select id="personFilter"><option value="">Todos</option></select><select id="priorityFilter"><option value="">Todas as prioridades</option><option value="critical">Crítica</option><option value="high">Alta</option><option value="medium">Média</option><option value="low">Baixa</option></select></section><section id="board" class="board"></section></main></div>
-<dialog id="taskDialog" class="dialog"><div class="dialog-head"><h3 id="taskDialogTitle">Nova tarefa</h3><button class="icon-btn" data-close="taskDialog">×</button></div><div class="dialog-body"><input id="taskId" type="hidden"><div id="collaboratorNote" class="collaborator-note hidden">Como colaborador, podes atualizar apenas o estado e as observações.</div><div class="grid2"><div class="field"><label>Tarefa</label><input id="taskTitle"></div><div class="field"><label>Responsável</label><input id="taskOwner" disabled></div><div class="field"><label>Atribuir a</label><select id="taskPerson"></select></div><div class="field"><label>Prioridade</label><select id="taskPriority"><option value="low">Baixa</option><option value="medium">Média</option><option value="high">Alta</option><option value="critical">Crítica</option></select></div><div class="field"><label>Data limite</label><div class="grid2"><input id="taskDate" type="date"><input id="taskTime" type="time"></div></div><div class="field"><label>Estado</label><select id="taskStatus"><option value="todo">Por iniciar</option><option value="in_progress">Em curso</option><option value="review">Terminada — a validar</option><option value="done">Validada</option></select></div></div><div class="field"><label>Observações</label><textarea id="taskNotes"></textarea></div><section id="attachmentsSection" class="section hidden"><h4>Anexos</h4><div class="attachment-row"><input id="attachmentFile" type="file"><button id="uploadAttachmentBtn" class="btn">Carregar</button></div><div id="attachmentList"></div></section><section id="auditSection" class="section hidden"><h4>Histórico</h4><div id="auditList"></div></section></div><div class="dialog-foot"><button id="deleteTaskBtn" class="btn danger">Eliminar</button><div><button class="btn" data-close="taskDialog">Cancelar</button> <button id="saveTaskBtn" class="btn primary">Guardar</button></div></div></dialog>
-<dialog id="peopleDialog" class="dialog wide"><div class="dialog-head"><div><div class="eyebrow">Administração</div><h3>Gestão de acessos</h3></div><button class="icon-btn" data-close="peopleDialog">×</button></div><div class="dialog-body"><div class="access-note">Apenas o administrador pode criar acessos. O colaborador recebe um email para definir a palavra-passe.</div><section class="access-create"><h4>Novo colaborador</h4><div class="grid2"><div class="field"><label>Nome</label><input id="inviteName"></div><div class="field"><label>Email</label><input id="inviteEmail" type="email"></div><div class="field"><label>Departamento</label><input id="inviteDepartment"></div><div class="field"><label>Perfil</label><select id="inviteRole"><option value="collaborator">Colaborador</option><option value="admin">Administrador</option></select></div></div><button id="createInviteBtn" class="btn primary">Criar acesso e enviar convite</button> <button id="refreshPeopleBtn" class="btn">Atualizar</button></section><section class="section"><h4>Utilizadores</h4><div id="peopleList"></div></section><section class="section"><h4>Convites pendentes</h4><div id="inviteList"></div></section></div></dialog>
-<dialog id="teamDashboardDialog" class="dialog wide"><div class="dialog-head"><div><div class="eyebrow">Análise operacional</div><h3>Desempenho da equipa</h3></div><button class="icon-btn" data-close="teamDashboardDialog">×</button></div><div class="dialog-body"><div class="team-summary" id="teamSummary"></div><div class="table-wrap"><table class="team-table"><thead><tr><th>Colaborador</th><th>Ativas</th><th>Em atraso</th><th>Concluídas 30 dias</th><th>Tempo médio</th><th>Estado</th></tr></thead><tbody id="teamMetricsBody"></tbody></table></div></div></dialog>
-<div id="toast" class="toast"></div><script src="config.js"></script><script type="module" src="app.js"></script><script type="module" src="invite-access.js"></script><script type="module" src="collaborator-workflow.js"></script><script type="module" src="collaborator-dashboard.js"></script><script type="module" src="admin-dashboard-v3.js"></script><script src="admin-task-control.js"></script><script src="access-cleanup.js"></script></body></html>
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Atlas v3.1 · Task Engine</title>
+  <meta name="theme-color" content="#070707" />
+  <meta name="description" content="Atlas — centro operacional pessoal com tarefas, prioridades, recorrência e alertas." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Atlas" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="atlas-icon.svg" />
+
+  <link rel="stylesheet" href="atlas-v31.css" />
+</head>
+
+<body data-theme="dark">
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">A</div>
+        <div>
+          <h1>Atlas</h1>
+          <p>Centro operacional · Task Engine 3.1</p>
+        </div>
+      </div>
+      <div class="today-chip" id="todayChip">Hoje</div>
+    </header>
+
+    <main>
+      <section id="home" class="screen active">
+        <article class="hero">
+          <h2>Centro operacional</h2>
+          <p>O Atlas ordena o teu dia por urgência, prazo e prioridade. Trabalho continua a ser o foco principal.</p>
+          <div class="next-action" id="nextActionBox"></div>
+        </article>
+
+        <section class="ops-grid">
+          <article class="ops-card"><span>Hoje</span><strong id="metricToday">0</strong></article>
+          <article class="ops-card"><span>Críticas</span><strong id="metricCritical">0</strong></article>
+          <article class="ops-card"><span>Atrasadas</span><strong id="metricOverdue">0</strong></article>
+          <article class="ops-card"><span>Concluídas hoje</span><strong id="metricDone">0</strong></article>
+        </section>
+
+        <section class="task-layout">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Trabalho</h3>
+                <small>Foco principal</small>
+              </div>
+              <span class="weight">70%</span>
+            </div>
+            <div id="workToday" class="task-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Pessoal</h3>
+                <small>Gestão leve</small>
+              </div>
+              <span class="weight">20%</span>
+            </div>
+            <div id="personalToday" class="task-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Loja</h3>
+                <small>Segundo plano</small>
+              </div>
+              <span class="weight">10%</span>
+            </div>
+            <div id="shopToday" class="task-list"></div>
+          </article>
+        </section>
+      </section>
+
+      <section id="calendar" class="screen">
+        <div class="calendar-top">
+          <button class="icon-btn" id="prevMonth" aria-label="Mês anterior">‹</button>
+          <h2 id="monthTitle">Mês</h2>
+          <button class="icon-btn" id="nextMonth" aria-label="Mês seguinte">›</button>
+        </div>
+
+        <article class="panel">
+          <div class="calendar-grid" id="calendarGrid"></div>
+        </article>
+
+        <article class="panel calendar-details">
+          <h3 id="selectedDayTitle">Dia selecionado</h3>
+          <p class="section-title">O que tens a fazer</p>
+          <div id="selectedDayTasks" class="task-list"></div>
+        </article>
+      </section>
+
+      <section id="alerts" class="screen">
+        <article class="hero">
+          <h2>Alertas</h2>
+          <p>Tudo o que ficou por fazer em dias anteriores aparece aqui.</p>
+        </article>
+
+        <div id="overdueList" class="alerts-list"></div>
+      </section>
+
+      <section id="more" class="screen">
+        <article class="hero">
+          <h2>Mais</h2>
+          <p>Preferências, modo claro/escuro, backup e manutenção.</p>
+        </article>
+
+        <section class="more-grid">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Aparência</h3>
+                <small>Modo claro e escuro</small>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn" id="themeDark">Modo escuro</button>
+              <button class="btn secondary" id="themeLight">Modo claro</button>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Backup</h3>
+                <small>Guardar ou restaurar dados</small>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn" id="exportData">Exportar backup</button>
+              <label class="btn secondary" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+                Importar backup
+                <input id="importData" type="file" accept="application/json" style="display:none">
+              </label>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Manutenção</h3>
+                <small>Limpeza simples</small>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn secondary" id="clearDone">Limpar concluídas</button>
+              <button class="btn ghost" id="resetData">Apagar tudo</button>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <button class="fab" id="openTaskModal" aria-label="Criar nova tarefa">+</button>
+
+  <nav class="bottom-nav">
+    <button class="active" data-screen="home">🏠<br>Início</button>
+    <button data-screen="calendar">📅<br>Calendário</button>
+    <button data-screen="alerts">⚠️<br>Alertas</button>
+    <button data-screen="more">☰<br>Mais</button>
+  </nav>
+
+  <section class="modal" id="taskModal" aria-hidden="true">
+    <div class="modal-card">
+      <h2 id="taskModalTitle">Nova tarefa</h2>
+
+      <form id="taskForm" class="form-grid">
+        <input id="taskId" type="hidden" />
+
+        <div class="form-section">Essencial</div>
+        <label>
+          Área
+          <select id="taskArea" required>
+            <option value="Trabalho">Trabalho</option>
+            <option value="Pessoal">Pessoal</option>
+            <option value="Loja">Loja</option>
+          </select>
+        </label>
+
+        <label>
+          Tarefa
+          <input id="taskTitle" type="text" placeholder="Ex.: Confirmar expedições do dia" maxlength="160" required />
+        </label>
+
+        <div class="two">
+          <label>
+            Dia / prazo
+            <input id="taskDate" type="date" required />
+          </label>
+
+          <label>
+            Hora
+            <input id="taskTime" type="time" />
+          </label>
+        </div>
+
+        <div class="two">
+          <label>
+            Prioridade
+            <select id="taskPriority" required>
+              <option value="Normal">Normal</option>
+              <option value="Alta">Alta</option>
+              <option value="Crítica">Crítica</option>
+              <option value="Baixa">Baixa</option>
+            </select>
+          </label>
+
+          <label>
+            Estado
+            <select id="taskStatus" required>
+              <option value="Por fazer">Por fazer</option>
+              <option value="Em curso">Em curso</option>
+              <option value="Bloqueada">Bloqueada</option>
+              <option value="Concluída">Concluída</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-section">Automação</div>
+        <label>
+          Recorrência
+          <select id="taskRecurrence">
+            <option value="none">Não repetir</option>
+            <option value="daily">Todos os dias</option>
+            <option value="weekly">Todas as semanas</option>
+            <option value="monthly">Todos os meses</option>
+          </select>
+        </label>
+
+        <label>
+          Notas
+          <textarea id="taskNotes" placeholder="Contexto, contactos, referência, observações..." maxlength="1200"></textarea>
+        </label>
+
+        <div class="btn-row">
+          <button class="btn" type="submit" id="saveTaskBtn">Criar tarefa</button>
+          <button class="btn secondary" type="button" id="closeTaskModal">Cancelar</button>
+          <button class="btn ghost" type="button" id="deleteTaskBtn" style="display:none">Apagar</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <div class="toast" id="toast">Guardado</div>
+
+  <script src="atlas-v31-1.js"></script>
+  <script src="atlas-v31-2.js"></script>
+  <script src="atlas-v31-3.js"></script>
+</body>
+</html>
